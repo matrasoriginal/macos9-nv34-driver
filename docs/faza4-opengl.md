@@ -584,3 +584,7 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
   UBYTE → float → UBYTE (prevody int↔float na G4 drahé) a príprava vrcholu pre každý index.
   wolf-3: HwVtx.c = zabalená farba (R<<24|G<<16|B<<8|A) z poľa bez prevodu, vrchol (okno, s/q,
   farba) pripravený raz za volanie (gLV), hw_draw zapisuje c priamo.
+- wolf-3: Q3 OK; Wolfenstein glEnd 8–10 ms (z 10–12), dávky ~1 ms — stále ~2,5 µs/troj.
+  Príčina pravdepodobne: rýchla cesta prepočítala celý rozsah indexov (min…max) pri každom
+  volaní, hoci Wolfenstein kreslí malé kúsky z veľkého poľa. wolf-4: pozícia aj atribúty vrcholu
+  až pri prvom použití (značky generácie gPStamp/gAStamp). Repo pod gitom (prvý commit).

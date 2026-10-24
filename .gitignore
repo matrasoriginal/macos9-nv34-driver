@@ -1,0 +1,11 @@
+# build výstupy
+build/
+*/build/
+dist/
+
+# binárky tretích strán (Apple, ATI, NVIDIA, hry) — len lokálne, nešíriť
+reference/
+NVIDIA-v3.1-2002/
+
+# macOS
+.DS_Store

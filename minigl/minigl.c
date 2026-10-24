@@ -2826,6 +2826,7 @@ void gl_frame_stats(void)
         gTEnd = gTFlush = gTWait = gTSwap = 0;
         gHwUploads = gHwSubUploads = gHwUploadBytes = gHwSyncs = 0;
         gTGL = 0;
+        gTFinish = gFinishN = 0;
         return;
     }
     if (gStatsOn && gIvFrames >= 250 && ticks - gIvTicks >= 30) {
@@ -2833,7 +2834,7 @@ void gl_frame_stats(void)
         NVU32 perMs = (NVU32)((double)dt * 60.0 / dticks / 1000.0);   /* tb na ms */
         unsigned long fps10 = (unsigned long)(gIvFrames * 600.0 / dticks);
         lg("snimky %d: %u.%u fps, ms/snimku: celkom %u.%02u, glEnd %u.%02u (z toho davky %u.%02u, cakanie GPU %u.%02u), swap %u.%02u; "
-           "MiniGL spolu %u.%02u ms; DrawElements %d/%d pomalych (%u.%02u ms); orezanych %d troj. (%u.%02u ms, pas %u.%02u); "
+           "MiniGL spolu %u.%02u ms (glFinish %d× %u.%02u ms); DrawElements %d/%d pomalych (%u.%02u ms); orezanych %d troj. (%u.%02u ms, pas %u.%02u); "
            "%d troj./snimku, %d davok; nahrati %u (+%u ciastocnych, %u KB), sync %u; tb %u/ms",
            C->frames, fps10 / 10, fps10 % 10,
            ms100(dt, perMs, gIvFrames) / 100, ms100(dt, perMs, gIvFrames) % 100,
@@ -2842,6 +2843,7 @@ void gl_frame_stats(void)
            ms100(gTWait, perMs, gIvFrames) / 100, ms100(gTWait, perMs, gIvFrames) % 100,
            ms100(gTSwap, perMs, gIvFrames) / 100, ms100(gTSwap, perMs, gIvFrames) % 100,
            ms100(gTGL + gTSwap, perMs, gIvFrames) / 100, ms100(gTGL + gTSwap, perMs, gIvFrames) % 100,
+           (long)(gFinishN / gIvFrames), ms100(gTFinish, perMs, gIvFrames) / 100, ms100(gTFinish, perMs, gIvFrames) % 100,
            gStatDE / gIvFrames, gStatDEslow / gIvFrames,
            ms100(gTVerts, perMs, gIvFrames) / 100, ms100(gTVerts, perMs, gIvFrames) % 100,
            gStatClip / gIvFrames, ms100(gTClip, perMs, gIvFrames) / 100, ms100(gTClip, perMs, gIvFrames) % 100,
@@ -2859,5 +2861,6 @@ void gl_frame_stats(void)
         gStatClip = 0;
         gTClip = 0;
         gTGL = 0;
+        gTFinish = gFinishN = 0;
     }
 }

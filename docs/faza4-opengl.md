@@ -596,3 +596,8 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
   GL volania. Porovnanie: G4 1,25 GHz s Q3 v 640×480 ~87 fps (OS X, novšia verzia hry).
 - q3-8: celkový čas vo všetkých funkciách MiniGL (CHECK → atribút cleanup, hĺbka vnorenia) v
   štatistike „MiniGL spolu“; log taktu GPU (NVPLL/MPLL) pri inicializácii.
+- q3-8: **MiniGL spolu 15–19 ms z 27–32 ms** v hre (glEnd 6–7, dávky ~1, orezávanie ~1,5) — zvyšok
+  ~8 ms pravdepodobne čakanie v glFinish (nepočítané do „čakanie GPU“); aj prázdne snímky
+  (190 fps) 4,4 ms. **PLL: jadro 0x13b04 → ~99 MHz** (M 4, N 59, P 1, kryštál 13,5 MHz; COEFF_B
+  0x401 nejasné), pamäť 0x30000f01 → ~202 MHz. Timedemo 34 fps.
+- q3-9: čas a počet glFinish v štatistike; `nv34glnofinish` = glFinish bez čakania (test).

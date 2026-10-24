@@ -98,7 +98,7 @@ extern NVU32 gHwUploads, gHwUploadBytes, gHwSubUploads, gHwSyncs;
 
 /* časovanie (opt-2): časová základňa PPC */
 static inline NVU32 tb(void) { NVU32 v; __asm__ volatile("mftb %0" : "=r"(v)); return v; }
-extern NVU32 gTEnd, gTFlush, gTWait, gTSwap;
+extern NVU32 gTEnd, gTFlush, gTWait, gTSwap, gTFinish, gFinishN;
 int     hw_tex_upload(HwTex *t, int w, int h, int levels, void *const *pix, int fmt, int srcfmt);
 
 /* ARGB32 → 16-bit texel: A1R5G5B5 (0x02) alebo A4R4G4B4 (0x04), natívne BE ako NV34 RAVE */

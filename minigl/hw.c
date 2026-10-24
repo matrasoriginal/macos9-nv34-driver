@@ -588,11 +588,21 @@ void hw_pend_flush(void)
 }
 
 /* glFinish (opt-5): počkať len na predchádzajúcu snímku, nie na celú prácu GPU */
+NVU32 gTFinish, gFinishN;
+static int gNoFinish = -1;
+
 void hw_finish(void)
 {
-    NVU32 t0;
+    NVU32 t0, tb0 = tb();
     if (!S || gHwDead)
         return;
+    gFinishN++;
+    if (gNoFinish < 0)
+        gNoFinish = gl_boot_arg("nv34glnofinish");
+    if (gNoFinish) {                                /* q3-9: test — len odoslať, nečakať */
+        nva_kickoff(S->a);
+        return;
+    }
     if (gRefOK != 1) {
         hw_sync();
         return;
@@ -604,6 +614,7 @@ void hw_finish(void)
             hw_sync();
             break;
         }
+    gTFinish += tb() - tb0;
 }
 
 void hw_tex_free(HwTex *t)

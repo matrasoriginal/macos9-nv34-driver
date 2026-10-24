@@ -2469,7 +2469,12 @@ void glClear(GLbitfield mask)
         st.sh = s->scissor[3];
     }
     argb = (ub(s->clearColor[3]) << 24) | (ub(s->clearColor[0]) << 16) | (ub(s->clearColor[1]) << 8) | ub(s->clearColor[2]);
-    z = (NVU32)(s->clearDepth * 16777215.0 + 0.5) << 8;
+    if (C->rt.z16) {
+        NVU32 v = (NVU32)(s->clearDepth * 65535.0 + 0.5);
+        z = (v << 16) | v;
+    } else {
+        z = (NVU32)(s->clearDepth * 16777215.0 + 0.5) << 8;
+    }
     hw_clear(&C->rt, (mask & GL_COLOR_BUFFER_BIT) != 0, (mask & GL_DEPTH_BUFFER_BIT) && C->depthBits > 0 && s->depthMask,
              argb, z, &st);
 }
@@ -2504,7 +2509,7 @@ static float poly_offset(const HwVtx *a, const HwVtx *b, const HwVtx *c)
         if (dzdy < 0) dzdy = -dzdy;
         m = dzdx > dzdy ? dzdx : dzdy;
     }
-    return m * s->polyFactor + POLY_R * s->polyUnits;
+    return m * s->polyFactor + (C->rt.z16 ? 1.0f / 32768.0f : POLY_R) * s->polyUnits;
 }
 
 static void apply_offset(HwVtx *v, int n, float off)
@@ -2624,7 +2629,7 @@ static int get_values(GLenum p, double *o)
     case 0x84E2:           o[0] = 1; return 1;                                         /* MAX_TEXTURE_UNITS_ARB */
     case 0x84E0:           o[0] = 0x84C0 + C->unit; return 1;                          /* ACTIVE_TEXTURE_ARB */
     case 0x84E1:           o[0] = 0x84C0 + C->cunit; return 1;                         /* CLIENT_ACTIVE_TEXTURE_ARB */
-    case GL_DEPTH_BITS:    o[0] = C->depthBits; return 1;
+    case GL_DEPTH_BITS:    o[0] = C->depthBits ? (C->rt.z16 ? 16 : 24) : 0; return 1;
     case GL_RED_BITS: case 0x0D53: case 0x0D54: o[0] = C->rt.bpp == 16 ? 5 : 8; return 1;
     case GL_ALPHA_BITS:    o[0] = C->rt.bpp == 16 ? 0 : 8; return 1;
     case GL_STENCIL_BITS:  o[0] = 0; return 1;

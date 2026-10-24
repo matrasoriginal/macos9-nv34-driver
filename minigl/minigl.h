@@ -32,6 +32,7 @@ typedef struct HwTarget {
     int     w, h;
     NVU32   colorOff, colorPitch;   /* zadný buffer */
     NVU32   zOff, zPitch;
+    int     z16;                    /* q3-10: Z16 namiesto Z24S8 (16 bpp a hra pýta ≤ 16 bitov) */
 } HwTarget;
 
 typedef struct HwTex {
@@ -58,7 +59,7 @@ typedef struct HwState {
 } HwState;
 
 int     hw_init(void);                                  /* 1 = GPU pripravené */
-int     hw_target_alloc(HwTarget *t, int w, int h, int bpp);
+int     hw_target_alloc(HwTarget *t, int w, int h, int bpp, int zbits);
 void    hw_target_free(HwTarget *t);
 int     hw_bind(HwTarget *t);
 int     hw_state(HwTarget *t, const HwState *st);    /* 1 = s textúrou */

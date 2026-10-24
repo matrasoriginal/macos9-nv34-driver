@@ -136,13 +136,16 @@ int hw_init(void)
     return 1;
 }
 
-int hw_target_alloc(HwTarget *t, int w, int h, int bpp)
+int hw_target_alloc(HwTarget *t, int w, int h, int bpp, int zbits)
 {
     t->w = w;
     t->h = h;
     t->bpp = bpp;
-    /* farba a zeta Z24S8 s rovnakým pitchom (rave-2, rave-16) */
-    t->colorPitch = t->zPitch = (w * 4 + 63) & ~63L;
+    /* farba a zeta s rovnakým pitchom (rave-2, rave-16). q3-10: pri 16 bpp a požadovanej hĺbke
+     * ≤ 16 bitov Z16 — polovičný prenos pamäte pri teste hĺbky (Quake III je obmedzený GPU);
+     * boot-args nv34glz24 = vždy Z24S8 */
+    t->z16 = bpp == 16 && zbits > 0 && zbits <= 16 && !gl_boot_arg("nv34glz24");
+    t->colorPitch = t->zPitch = (w * (t->z16 ? 2 : 4) + 63) & ~63L;
     t->colorOff = S->vramAlloc(t->colorPitch * h, 4096);
     t->zOff = S->vramAlloc(t->zPitch * h, 4096);
     if (!t->colorOff || !t->zOff) {
@@ -183,7 +186,7 @@ int hw_bind(HwTarget *t)
     begin(M_RT_HORIZ, 5);
     data(t->w << 16);
     data(t->h << 16);
-    data((t->bpp == 16 ? 0x102 : 0x108) | 0x40);    /* farba | Z24S8 | linear */
+    data((t->bpp == 16 ? 0x102 : 0x108) | (t->z16 ? 0x20 : 0x40));   /* farba | Z16/Z24S8 | linear */
     data((t->zPitch << 16) | t->colorPitch);
     data(t->colorOff);
     begin(0x0214, 1);

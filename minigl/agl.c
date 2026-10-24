@@ -88,7 +88,7 @@ void *aglChoosePixelFormat(const GDHandle *gdevs, GLint ndev, const GLint *attri
             lg("  atribut %d = %d", a, v);
         switch (a) {
         case AGL_DOUBLEBUFFER: p->dbl = 1; break;
-        case AGL_DEPTH_SIZE:   p->depth = v > 0 ? 24 : 0; break;
+        case AGL_DEPTH_SIZE:   p->depth = v <= 0 ? 0 : v <= 16 ? 16 : 24; break;
         case AGL_STENCIL_SIZE: p->stencil = v; break;
         case AGL_FULLSCREEN:   p->fullscreen = 1; break;
         case AGL_STEREO:
@@ -365,12 +365,13 @@ static int update_geom(GLCtx *c)
         lg("3D init zlyhal");
         return 0;
     }
-    if (!hw_target_alloc(&c->rt, w, h, bpp)) {
+    if (!hw_target_alloc(&c->rt, w, h, bpp, c->depthBits)) {
         lg("malo VRAM pre zadny buffer %dx%d (volne %u KB)", w, h, S->vramFreeBytes() >> 10);
         return 0;
     }
     c->hasRT = 1;
-    lg("zadny buffer %dx%d %d bpp: farba %x z %x pitch %u, okno na (%d,%d), VRAM volna %u KB", w, h, bpp,
+    lg("zadny buffer %dx%d %d bpp z%d: farba %x z %x pitch %u, okno na (%d,%d), VRAM volna %u KB", w, h, bpp,
+       c->rt.z16 ? 16 : 24,
        c->rt.colorOff, c->rt.zOff, c->rt.colorPitch, c->global.left, c->global.top, S->vramFreeBytes() >> 10);
     if (!c->viewportSet) {
         c->s.viewport[0] = c->s.viewport[1] = 0;

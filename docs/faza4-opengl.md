@@ -601,3 +601,9 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
   (190 fps) 4,4 ms. **PLL: jadro 0x13b04 → ~99 MHz** (M 4, N 59, P 1, kryštál 13,5 MHz; COEFF_B
   0x401 nejasné), pamäť 0x30000f01 → ~202 MHz. Timedemo 34 fps.
 - q3-9: čas a počet glFinish v štatistike; `nv34glnofinish` = glFinish bez čakania (test).
+- q3-9: 34,8 / 34,5 fps (nv34glnofinish sa neuplatnil — glFinish aj v 2. behu ~10 ms).
+  **glFinish čaká 8–11 ms/snímku** aj v menu → GPU je úzke miesto (snímka GPU ≈ snímka CPU);
+  MiniGL na CPU ~7–9 ms, Quake III ~10–12 ms. Jadro ~99 MHz, pamäť ~202 MHz.
+- q3-10: Z16 pri 16 bpp, ak hra pýta hĺbku ≤ 16 (Quake III: AGL_DEPTH_SIZE 16) — polovičný
+  prenos pri teste hĺbky, farba aj zeta pitch 2 B/px; polygon offset r = 2⁻¹⁵ pre Z16;
+  `nv34glz24` = vždy Z24S8.

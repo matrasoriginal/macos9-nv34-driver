@@ -621,3 +621,8 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
 - q3-12 výsledok: multitextúra funguje (v hre 500–1000 troj./snímku s 2 textúrami, obraz v poriadku),
   timedemo 50 fps (z 48). V hre ~20 ms/snímku: MiniGL ~8 ms, samotný Quake III ~12 ms — hra je
   teraz väčšia časť. q3-13: meranie skutočného taktu CPU (podozrenie na zníženú rýchlosť procesora).
+- q3-14 výsledok: rozdielové meranie ~750 MHz, device tree hlási clock-frequency 1 GHz, zbernica
+  132,7 MHz, cpu-version 0x80010201 (MPC7455), `dynamic-power-step` prítomné (prepínanie rýchlosti
+  cez PMU). Procesor teda beží na zníženom takte.
+- q3-15: Power Manager (PowerMgrLib) — log rýchlostí; boot-args `nv34cpufull` / `nv34cputoggle`
+  skúsia SetProcessorSpeed a takt znova zmerajú.

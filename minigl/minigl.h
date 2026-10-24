@@ -204,6 +204,7 @@ void    gl_frame_stats(void);
 void    gl_stats_init(void);
 extern int gDbg;                            /* hl-3: podrobný log (Half-Life) */
 void    gl_release_textures(void);
+NVU32   gl_cpu_mhz(void);                   /* q3-15: zmeraný takt CPU */
 void    gl_mem_report(void);           /* pri ukončení: VRAM späť do zdieľanej arény */
 
 #endif

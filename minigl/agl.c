@@ -699,6 +699,58 @@ void aglResetLibrary(void)
 }
 
 /* CFM init/term (pef.py setinit) */
+/* q3-15: Power Manager — takt procesora. Mac OS 9 nepozná PowerBook6,2 a procesor beží na
+ * ~750 MHz namiesto 1 GHz (meranie q3-13/14). boot-args nv34cpufull = SetProcessorSpeed(true),
+ * nv34cputoggle = najprv nízka, potom plná rýchlosť (prinúti prepnutie). */
+static void *lib_fn(const char *lib, const char *name)
+{
+    ConnectionID conn;
+    Str255 p, err;
+    Ptr a = 0, mainAddr;
+    SymClass cls;
+    int i;
+    for (i = 0; lib[i]; i++)
+        p[i + 1] = lib[i];
+    p[0] = i;
+    if (GetSharedLibrary(p, kPowerPCArch, kReferenceCFrag, &conn, &mainAddr, err) != noErr)
+        return 0;
+    for (i = 0; name[i]; i++)
+        p[i + 1] = name[i];
+    p[0] = i;
+    if (FindSymbol(conn, p, &a, &cls) != noErr)
+        return 0;
+    return a;
+}
+
+static void cpu_speed(void)
+{
+    typedef short (*ShortFn)(void);
+    typedef long (*LongFn)(void);
+    typedef unsigned char (*BoolFn)(void);
+    typedef unsigned char (*SetFn)(unsigned char);
+    LongFn getCPU = (LongFn)lib_fn("InterfaceLib", "GetCPUSpeed");
+    ShortFn cur = (ShortFn)lib_fn("PowerMgrLib", "CurrentProcessorSpeed");
+    ShortFn max = (ShortFn)lib_fn("PowerMgrLib", "MaximumProcessorSpeed");
+    ShortFn min = (ShortFn)lib_fn("PowerMgrLib", "MinimumProcessorSpeed");
+    BoolFn full = (BoolFn)lib_fn("PowerMgrLib", "FullProcessorSpeed");
+    BoolFn cyc = (BoolFn)lib_fn("PowerMgrLib", "IsProcessorCyclingEnabled");
+    SetFn set = (SetFn)lib_fn("PowerMgrLib", "SetProcessorSpeed");
+    int doFull = gl_boot_arg("nv34cpufull"), doToggle = gl_boot_arg("nv34cputoggle");
+
+    lg("Power Manager: GetCPUSpeed %d, aktualna %d, max %d, min %d MHz, plna %d, cycling %d; SetProcessorSpeed %s",
+       getCPU ? getCPU() : -1, cur ? cur() : -1, max ? max() : -1, min ? min() : -1, full ? full() : -1,
+       cyc ? cyc() : -1, set ? "ano" : "nie");
+    lg("CPU zmerane: %u MHz", gl_cpu_mhz());
+    if (!set || (!doFull && !doToggle))
+        return;
+    if (doToggle) {
+        lg("SetProcessorSpeed(false) = %d", set(0));
+        lg("  -> zmerane %u MHz, aktualna %d", gl_cpu_mhz(), cur ? cur() : -1);
+    }
+    lg("SetProcessorSpeed(true) = %d", set(1));
+    lg("  -> zmerane %u MHz, aktualna %d, plna %d", gl_cpu_mhz(), cur ? cur() : -1, full ? full() : -1);
+}
+
 OSErr MiniGLInit(void *initBlock)
 {
     ProcessSerialNumber psn;
@@ -716,6 +768,7 @@ OSErr MiniGLInit(void *initBlock)
     name[name[0] < 31 ? name[0] + 1 : 31] = 0;
     lg("==== NV34 MiniGL 1: nacitana v procese \"%s\", NV34 %s, 3D stav %u", (char *)name + 1,
        shared() ? "ano" : "nie", S ? S->state3D : 0);
+    cpu_speed();
     return noErr;
 }
 

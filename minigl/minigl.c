@@ -2944,6 +2944,12 @@ static NVU32 cpu_mhz(NVU32 perMs)
     return b > a ? (NVU32)(8000.0 * perMs / (b - a)) : 0;
 }
 
+/* q3-15: pre agl.c (pred prvou snímkou: časová základňa 18,432 MHz z device tree) */
+NVU32 gl_cpu_mhz(void)
+{
+    return cpu_mhz(18432);
+}
+
 /* vlastnosti uzla procesora v Name Registry (takt, znížený takt, power step) */
 static void cpu_props(void)
 {

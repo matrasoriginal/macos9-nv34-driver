@@ -588,3 +588,6 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
   Príčina pravdepodobne: rýchla cesta prepočítala celý rozsah indexov (min…max) pri každom
   volaní, hoci Wolfenstein kreslí malé kúsky z veľkého poľa. wolf-4: pozícia aj atribúty vrcholu
   až pri prvom použití (značky generácie gPStamp/gAStamp). Repo pod gitom (prvý commit).
+- wolf-4: bez zlepšenia (glEnd 8–10 ms pri ~3200–3700 troj.). Podozrenie: ochranný pás 1,01
+  (od minigl-5) → každý trojuholník presahujúci okraj ide cez clip_poly + emit_poly. wolf-5:
+  štatistika orezaných trojuholníkov a ich času, pás cez boot-args `nv34glguard2` / `nv34glguard4`.

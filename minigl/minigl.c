@@ -91,6 +91,7 @@ static double cos_(double x) { return sin_(x + 1.57079632679489661923); }
 /* ---- zdieľaný stav a log ---------------------------------------------------- */
 
 int gDbg;
+static float gGuard = 1.01f;                /* ochranný pás orezávania (wolf-5) */
 static int gTexDbg, gTexDbgN;               /* q3-1: boot-args nv34gltex */
 static int gStatsOn;                /* boot-args nv34glstats: časy každých 250 snímok do logu */
 
@@ -125,6 +126,10 @@ void gl_stats_init(void)
     gStatsOn = boot_arg("nv34glstats");
     gDbg = boot_arg("nv34gldebug");
     gTexDbg = boot_arg("nv34gltex");
+    if (boot_arg("nv34glguard2"))
+        gGuard = 2.0f;
+    if (boot_arg("nv34glguard4"))
+        gGuard = 4.0f;
 }
 
 NV34Shared *shared(void)
@@ -1285,7 +1290,11 @@ void gl_flush_batch(void)
 /* minigl-4: pri páse 4× mal záblesk Quake 2 (štvoruholník ±100 pred kamerou) vrcholy okolo
  * -960…1600 px a na spoločnej hrane trojuholníkov čiernu čiaru (interpolácia farby obrích
  * trojuholníkov) → orezávať tesne za okrajom viewportu */
-#define GUARD 1.01f
+#define GUARD gGuard
+/* wolf-5: šírka pásu nastaviteľná (boot-args nv34glguard2 / nv34glguard4) — pri 1,01 ide každý
+ * trojuholník presahujúci okraj obrazovky cez úplné orezanie na CPU */
+static long gStatClip;
+static NVU32 gTClip;
 
 /* bity mimo: 0 blízka, 1 w≤0, 2..5 ochranný pás; 8..13 frustum (na zahodenie) */
 static NVU32 outcode(const V *v)
@@ -1447,9 +1456,14 @@ static void tri(const V *a, const V *b, const V *c, const V *prov)
         emit_poly(in, 3);
         return;
     }
-    n = clip_poly(in, 3, out, (c0 | c1 | c2) & 0x3f);
-    if (n >= 3)
-        emit_poly(out, n);
+    {
+        NVU32 t0 = tb();
+        n = clip_poly(in, 3, out, (c0 | c1 | c2) & 0x3f);
+        if (n >= 3)
+            emit_poly(out, n);
+        gStatClip++;
+        gTClip += tb() - t0;
+    }
 }
 
 static void line(const V *a, const V *b)
@@ -2808,7 +2822,7 @@ void gl_frame_stats(void)
         NVU32 perMs = (NVU32)((double)dt * 60.0 / dticks / 1000.0);   /* tb na ms */
         unsigned long fps10 = (unsigned long)(gIvFrames * 600.0 / dticks);
         lg("snimky %d: %u.%u fps, ms/snimku: celkom %u.%02u, glEnd %u.%02u (z toho davky %u.%02u, cakanie GPU %u.%02u), swap %u.%02u; "
-           "DrawElements %d/%d pomalych (%u.%02u ms); "
+           "DrawElements %d/%d pomalych (%u.%02u ms); orezanych %d troj. (%u.%02u ms, pas %u.%02u); "
            "%d troj./snimku, %d davok; nahrati %u (+%u ciastocnych, %u KB), sync %u; tb %u/ms",
            C->frames, fps10 / 10, fps10 % 10,
            ms100(dt, perMs, gIvFrames) / 100, ms100(dt, perMs, gIvFrames) % 100,
@@ -2818,6 +2832,8 @@ void gl_frame_stats(void)
            ms100(gTSwap, perMs, gIvFrames) / 100, ms100(gTSwap, perMs, gIvFrames) % 100,
            gStatDE / gIvFrames, gStatDEslow / gIvFrames,
            ms100(gTVerts, perMs, gIvFrames) / 100, ms100(gTVerts, perMs, gIvFrames) % 100,
+           gStatClip / gIvFrames, ms100(gTClip, perMs, gIvFrames) / 100, ms100(gTClip, perMs, gIvFrames) % 100,
+           (NVU32)gGuard, (NVU32)(gGuard * 100) % 100,
            gStatTris / gIvFrames, gStatBatches / gIvFrames, gHwUploads, gHwSubUploads, gHwUploadBytes >> 10,
            gHwSyncs, perMs);
         gIvTb = now;
@@ -2828,5 +2844,7 @@ void gl_frame_stats(void)
         gHwUploads = gHwSubUploads = gHwUploadBytes = gHwSyncs = 0;
         gStatDE = gStatDEslow = 0;
         gTVerts = 0;
+        gStatClip = 0;
+        gTClip = 0;
     }
 }

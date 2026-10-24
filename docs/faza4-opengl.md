@@ -618,3 +618,6 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
   farba ako pri jednej textúre. Vrchol 12 slov (tex1 = atribút 9), TEX_UNITS_ENABLE = 3, blok
   textúry 1 na 0x1a20. Pri nahrávaní textúry jednotky 1 sa nevyhadzuje textúra jednotky 0
   (gTexPin). boot-args `nv34glnomt` = bez multitextúry. Merače času z vnútornej slučky preč.
+- q3-12 výsledok: multitextúra funguje (v hre 500–1000 troj./snímku s 2 textúrami, obraz v poriadku),
+  timedemo 50 fps (z 48). V hre ~20 ms/snímku: MiniGL ~8 ms, samotný Quake III ~12 ms — hra je
+  teraz väčšia časť. q3-13: meranie skutočného taktu CPU (podozrenie na zníženú rýchlosť procesora).

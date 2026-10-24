@@ -2917,6 +2917,19 @@ static unsigned long ms100(NVU32 t, NVU32 perMs, long frames)
     return perMs && frames ? (unsigned long)((double)t * 100.0 / perMs / frames) : 0;
 }
 
+/* q3-13: skutočný takt CPU — 4 závislé sčítania na iteráciu (latencia 1 takt na G4) */
+static NVU32 cpu_mhz(NVU32 perMs)
+{
+    NVU32 t0, t1, x = 1;
+    long n = 1000000;
+    t0 = tb();
+    __asm__ volatile("mtctr %1\n"
+                     "1: add %0,%0,%0\n add %0,%0,%0\n add %0,%0,%0\n add %0,%0,%0\n bdnz 1b"
+                     : "+r"(x) : "r"(n) : "ctr");
+    t1 = tb();
+    return t1 != t0 ? (NVU32)(4000.0 * perMs / (t1 - t0)) : 0;
+}
+
 void gl_frame_stats(void)
 {
     NVU32 now = tb(), ticks = TickCount();
@@ -2942,6 +2955,11 @@ void gl_frame_stats(void)
         NVU32 dt = now - gIvTb, dticks = ticks - gIvTicks;
         NVU32 perMs = (NVU32)((double)dt * 60.0 / dticks / 1000.0);   /* tb na ms */
         unsigned long fps10 = (unsigned long)(gIvFrames * 600.0 / dticks);
+        static int mhzDone;
+        if (!mhzDone) {
+            mhzDone = 1;
+            lg("CPU: ~%u MHz (meranie), ~%u MHz (druhe meranie)", cpu_mhz(perMs), cpu_mhz(perMs));
+        }
         lg("snimky %d: %u.%u fps, ms/snimku: celkom %u.%02u, glEnd %u.%02u (z toho davky %u.%02u, cakanie GPU %u.%02u), swap %u.%02u; "
            "MiniGL spolu %u.%02u ms (glFinish %d× %u.%02u ms); rychla cesta: %d troj., poz. %d, atrib. %d; 2 textury %d troj.; DrawElements %d/%d pomalych (%u.%02u ms); orezanych %d troj. (%u.%02u ms, pas %u.%02u); "
            "%d troj./snimku, %d davok; nahrati %u (+%u ciastocnych, %u KB), sync %u; tb %u/ms",

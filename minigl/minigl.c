@@ -2112,6 +2112,9 @@ static void lc_attr(int ci)
     gAStamp[ci] = gAGen;
 }
 
+/* q3-11: rozpad času rýchlej cesty */
+static NVU32 gTPos, gTAttr, gNPos, gNAttr, gNFastTri;
+
 static int draw_tris_fast(GLsizei count, GLenum type, const GLvoid *idx)
 {
     GLS *s = &C->s;
@@ -2165,8 +2168,12 @@ static int draw_tris_fast(GLsizei count, GLenum type, const GLvoid *idx)
             id[j] = type == GL_UNSIGNED_BYTE ? ((const GLubyte *)idx)[q] :
                     type == GL_UNSIGNED_SHORT ? ((const GLushort *)idx)[q] : (GLint)((const GLuint *)idx)[q];
             c[j] = id[j] - gLcBase;
-            if (gPStamp[c[j]] != gPGen)
+            if (gPStamp[c[j]] != gPGen) {
+                NVU32 t0 = tb();
                 lc_pos(c[j]);
+                gTPos += tb() - t0;
+                gNPos++;
+            }
         }
         oa = gLO[c[0]]; ob = gLO[c[1]]; oc = gLO[c[2]];
         if (oa & ob & oc & 0x3f00)
@@ -2184,8 +2191,13 @@ static int draw_tris_fast(GLsizei count, GLenum type, const GLvoid *idx)
             continue;
         }
         for (j = 0; j < 3; j++)
-            if (gAStamp[c[j]] != gAGen)
+            if (gAStamp[c[j]] != gAGen) {
+                NVU32 t0 = tb();
                 lc_attr(c[j]);
+                gTAttr += tb() - t0;
+                gNAttr++;
+            }
+        gNFastTri++;
         {
             const HwVtx *pa = &gLV[c[0]], *pb = &gLV[c[1]], *pc = &gLV[c[2]];
             float area = (pb->x - pa->x) * (pc->y - pa->y) - (pc->x - pa->x) * (pb->y - pa->y);
@@ -2839,7 +2851,7 @@ void gl_frame_stats(void)
         NVU32 perMs = (NVU32)((double)dt * 60.0 / dticks / 1000.0);   /* tb na ms */
         unsigned long fps10 = (unsigned long)(gIvFrames * 600.0 / dticks);
         lg("snimky %d: %u.%u fps, ms/snimku: celkom %u.%02u, glEnd %u.%02u (z toho davky %u.%02u, cakanie GPU %u.%02u), swap %u.%02u; "
-           "MiniGL spolu %u.%02u ms (glFinish %d× %u.%02u ms); DrawElements %d/%d pomalych (%u.%02u ms); orezanych %d troj. (%u.%02u ms, pas %u.%02u); "
+           "MiniGL spolu %u.%02u ms (glFinish %d× %u.%02u ms); rychla cesta: %d troj., poz. %d (%u.%02u ms), atrib. %d (%u.%02u ms); DrawElements %d/%d pomalych (%u.%02u ms); orezanych %d troj. (%u.%02u ms, pas %u.%02u); "
            "%d troj./snimku, %d davok; nahrati %u (+%u ciastocnych, %u KB), sync %u; tb %u/ms",
            C->frames, fps10 / 10, fps10 % 10,
            ms100(dt, perMs, gIvFrames) / 100, ms100(dt, perMs, gIvFrames) % 100,
@@ -2849,6 +2861,9 @@ void gl_frame_stats(void)
            ms100(gTSwap, perMs, gIvFrames) / 100, ms100(gTSwap, perMs, gIvFrames) % 100,
            ms100(gTGL + gTSwap, perMs, gIvFrames) / 100, ms100(gTGL + gTSwap, perMs, gIvFrames) % 100,
            (long)(gFinishN / gIvFrames), ms100(gTFinish, perMs, gIvFrames) / 100, ms100(gTFinish, perMs, gIvFrames) % 100,
+           (long)(gNFastTri / gIvFrames), (long)(gNPos / gIvFrames),
+           ms100(gTPos, perMs, gIvFrames) / 100, ms100(gTPos, perMs, gIvFrames) % 100,
+           (long)(gNAttr / gIvFrames), ms100(gTAttr, perMs, gIvFrames) / 100, ms100(gTAttr, perMs, gIvFrames) % 100,
            gStatDE / gIvFrames, gStatDEslow / gIvFrames,
            ms100(gTVerts, perMs, gIvFrames) / 100, ms100(gTVerts, perMs, gIvFrames) % 100,
            gStatClip / gIvFrames, ms100(gTClip, perMs, gIvFrames) / 100, ms100(gTClip, perMs, gIvFrames) % 100,
@@ -2867,5 +2882,6 @@ void gl_frame_stats(void)
         gTClip = 0;
         gTGL = 0;
         gTFinish = gFinishN = 0;
+        gTPos = gTAttr = gNPos = gNAttr = gNFastTri = 0;
     }
 }

@@ -607,3 +607,6 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
 - q3-10: Z16 pri 16 bpp, ak hra pýta hĺbku ≤ 16 (Quake III: AGL_DEPTH_SIZE 16) — polovičný
   prenos pri teste hĺbky, farba aj zeta pitch 2 B/px; polygon offset r = 2⁻¹⁵ pre Z16;
   `nv34glz24` = vždy Z24S8.
+- q3-10: **Quake III timedemo 48 fps** (z 34,8). glFinish v hre 0,1–0,8 ms (GPU už nebrzdí,
+  v menu ~5 ms). CPU: MiniGL ~8–9 ms (rýchla cesta ~5, orezávanie ~1,5, dávky ~1), Q3 ~12 ms.
+- q3-11: rozpad rýchlej cesty: počet trojuholníkov, výpočtov pozícií a atribútov a ich čas.

@@ -94,6 +94,7 @@ int gDbg;
 static float gGuard = 1.01f;                /* ochranný pás orezávania (wolf-5) */
 static int gTexDbg, gTexDbgN;               /* q3-1: boot-args nv34gltex */
 static int gStatsOn;                /* boot-args nv34glstats: časy každých 250 snímok do logu */
+static int gMT = 1;                 /* q3-12: GL_ARB_multitexture (boot-args nv34glnomt = vypnuté) */
 
 static int boot_arg(const char *word)
 {
@@ -130,6 +131,7 @@ void gl_stats_init(void)
         gGuard = 2.0f;
     if (boot_arg("nv34glguard4"))
         gGuard = 4.0f;
+    gMT = !boot_arg("nv34glnomt");
 }
 
 NV34Shared *shared(void)
@@ -210,7 +212,7 @@ static void fmt_num(char **o, NVU32 v, int base, int width, int neg)
 /* %s %d %u %x %c, šírka, %f = 3 desatinné miesta */
 void lg(const char *fmt, ...)
 {
-    char buf[256], *o = buf, *end = buf + sizeof(buf) - 24;
+    char buf[640], *o = buf, *end = buf + sizeof(buf) - 24;
     va_list ap;
 
     va_start(ap, fmt);
@@ -1128,6 +1130,19 @@ static TexObj *active_tex(void)
     return C->s.tex2D && t && t->lv[0] ? t : 0;
 }
 
+/* q3-12: druhá jednotka — len s textúrou na jednotke 0 a GL_MODULATE (lightmapy Quake III) */
+static TexObj *active_tex1(void)
+{
+    TexObj *t = C->bound1;
+    if (!gMT || !C->tex2D1 || !t || !t->lv[0] || !active_tex())
+        return 0;
+    if (C->texEnv1 != GL_MODULATE) {
+        ONCE(0x55200000 | (C->texEnv1 & 0xffff), "glTexEnv jednotky 1 = %x nepodporovane (jednotka 1 vypnuta)", C->texEnv1);
+        return 0;
+    }
+    return t;
+}
+
 /* hl-9: pri 16-bit obrazovke 16-bit textúry (polovica VRAM; Half-Life pri 1024×768 minul VRAM) */
 static int tex_format(TexObj *t)
 {
@@ -1202,7 +1217,7 @@ static int tex_prepare(TexObj *t)
 #define PB_MAX 1536
 static HwVtx gPB[PB_MAX];
 static int gPBn, gPBprim;
-static TexObj *gPBtex;
+static TexObj *gPBtex, *gPBtex1;
 
 static void fill_state(HwState *st, TexObj *tex)
 {
@@ -1244,9 +1259,16 @@ static void fill_state(HwState *st, TexObj *tex)
         st->wrapS = tex->wrapS;
         st->wrapT = tex->wrapT;
     }
+    if (tex && gPBtex1) {
+        st->tex1 = gPBtex1->hw;
+        st->minFilter1 = gPBtex1->minFilter;
+        st->magFilter1 = gPBtex1->magFilter;
+        st->wrapS1 = gPBtex1->wrapS;
+        st->wrapT1 = gPBtex1->wrapT;
+    }
 }
 
-static long gStatTris, gStatBatches;
+static long gStatTris, gStatBatches, gStatMT;
 static long gStatDE, gStatDEslow;             /* glDrawElements rýchla / pomalá cesta */
 static NVU32 gTVerts;                        /* čas pomalej cesty (glBegin/glArrayElement) */
 
@@ -1272,6 +1294,18 @@ void gl_flush_batch(void)
         if (!r)
             gPBtex = 0;
     }
+    if (gPBtex && gPBtex1) {                        /* q3-12: nahratie jednotky 1 nesmie vyhodiť jednotku 0 */
+        int r;
+        gTexPin = gPBtex->hw;
+        r = tex_prepare(gPBtex1);
+        gTexPin = 0;
+        if (r < 0) {
+            gPBn = 0;
+            return;
+        }
+        if (!r)
+            gPBtex1 = 0;
+    }
     memset(&st, 0, sizeof(st));
     fill_state(&st, gPBtex);
     textured = hw_state(&C->rt, &st);
@@ -1287,6 +1321,8 @@ void gl_flush_batch(void)
     }
     hw_draw(gPBprim, gPB, gPBn, textured);
     gStatTris += gPBn / 3;
+    if (textured == 2)
+        gStatMT += gPBn / 3;
     gStatBatches++;
     gPBn = 0;
     gTFlush += tb() - t0;
@@ -1340,7 +1376,7 @@ static void lerp(V *o, const V *a, const V *b, float t)
     const float *pa = &a->x, *pb = &b->x;
     float *po = &o->x;
     int i;
-    for (i = 0; i < 11; i++)
+    for (i = 0; i < V_FLOATS; i++)
         po[i] = pa[i] + (pb[i] - pa[i]) * t;
 }
 
@@ -1393,16 +1429,20 @@ static void project(HwVtx *o, const V *v, int texActive)
     o->sq = v->s * iw;
     o->tq = v->t * iw;
     o->q = v->q * iw;
+    o->sq1 = v->s1 * iw;
+    o->tq1 = v->t1 * iw;
+    o->q1 = v->q1 * iw;
     o->c = pack_rgba(o->r, o->g, o->b, o->a);
 }
 
 static void batch_begin(int prim, int need)
 {
-    TexObj *tex = active_tex();
-    if (gPBn && (gPBprim != prim || gPBtex != tex || gPBn + need > PB_MAX))
+    TexObj *tex = active_tex(), *tex1 = active_tex1();
+    if (gPBn && (gPBprim != prim || gPBtex != tex || gPBtex1 != tex1 || gPBn + need > PB_MAX))
         gl_flush_batch();
     gPBprim = prim;
     gPBtex = tex;
+    gPBtex1 = tex1;
 }
 
 static float poly_offset(const HwVtx *a, const HwVtx *b, const HwVtx *c);
@@ -1701,6 +1741,9 @@ static void vertex4(float x, float y, float z, float w)
         v->t = t[1] * c[0] + t[5] * c[1] + t[9] * c[2] + t[13] * c[3];
         v->q = t[3] * c[0] + t[7] * c[1] + t[11] * c[2] + t[15] * c[3];
     }
+    v->s1 = C->curTex1[0];
+    v->t1 = C->curTex1[1];
+    v->q1 = C->curTex1[3];
 }
 
 /* ---- vrcholy, farby, súradnice textúr (všetky varianty) ------------------------- */
@@ -1815,7 +1858,15 @@ void glClientActiveTextureARB(GLenum u)
     C->cunit = u >= 0x84C0 && u < 0x84C0 + 32 ? (int)(u - 0x84C0) : 0;
 }
 
-#define MTC(u, s, t, r, q) do { if ((u) == 0x84C0) texc((s), (t), (r), (q)); } while (0)
+static void texc1(float s, float t, float r, float q)
+{
+    if (!C)
+        return;
+    C->curTex1[0] = s; C->curTex1[1] = t; C->curTex1[2] = r; C->curTex1[3] = q;
+}
+
+#define MTC(u, s, t, r, q) do { if ((u) == 0x84C0) texc((s), (t), (r), (q)); \
+                                else if ((u) == 0x84C1) texc1((s), (t), (r), (q)); } while (0)
 void glMultiTexCoord1fARB(GLenum u, GLfloat s) { MTC(u, s, 0, 0, 1); }
 void glMultiTexCoord2fARB(GLenum u, GLfloat s, GLfloat t) { MTC(u, s, t, 0, 1); }
 void glMultiTexCoord3fARB(GLenum u, GLfloat s, GLfloat t, GLfloat r) { MTC(u, s, t, r, 1); }
@@ -1919,6 +1970,12 @@ void glArrayElement(GLint i)
         f[3] = 1.0f;
         fetch(&C->ta, i, f, 0);
         texc(f[0], f[1], f[2], f[3]);
+    }
+    if (C->ta1.on && C->ta1.ptr) {
+        f[1] = f[2] = 0.0f;
+        f[3] = 1.0f;
+        fetch(&C->ta1, i, f, 0);
+        texc1(f[0], f[1], f[2], f[3]);
     }
     if (C->va.on && C->va.ptr) {
         f[2] = 0.0f;
@@ -2065,11 +2122,20 @@ static void attr_fetch(GLint k, float *col, float *st)
     } else {
         st[0] = C->curTex[0]; st[1] = C->curTex[1]; st[2] = C->curTex[3];
     }
+    if (C->ta1.on && C->ta1.ptr) {
+        float f[4] = { 0, 0, 0, 1 };
+        fetch(&C->ta1, k, f, 0);
+        st[3] = f[0]; st[4] = f[1]; st[5] = f[3];
+    } else {
+        st[3] = C->curTex1[0]; st[4] = C->curTex1[1]; st[5] = C->curTex1[3];
+    }
 }
 
 static struct {
     const GLubyte *cb; long cstride;
     const float *tp; long tstride;
+    const float *tp1; long tstride1;           /* q3-12: jednotka 1 (len float × 2) */
+    int tex1;
     NVU32 ccur;
     int rep, repA;
 } gPrep;
@@ -2109,11 +2175,28 @@ static void lc_attr(int ci)
     w->tq = tv * p[3];
     w->q = qv * p[3];
     w->c = c;
+    if (gPrep.tex1) {
+        float s1, t1, q1 = 1.0f;
+        if (gPrep.tp1) {
+            const float *q = (const float *)((const char *)gPrep.tp1 + (long)k * gPrep.tstride1);
+            s1 = q[0];
+            t1 = q[1];
+        } else if (C->ta1.on && C->ta1.ptr) {
+            float f[4] = { 0, 0, 0, 1 };
+            fetch(&C->ta1, k, f, 0);
+            s1 = f[0]; t1 = f[1]; q1 = f[3];
+        } else {
+            s1 = C->curTex1[0]; t1 = C->curTex1[1]; q1 = C->curTex1[3];
+        }
+        w->sq1 = s1 * p[3];
+        w->tq1 = t1 * p[3];
+        w->q1 = q1 * p[3];
+    }
     gAStamp[ci] = gAGen;
 }
 
-/* q3-11: rozpad času rýchlej cesty */
-static NVU32 gTPos, gTAttr, gNPos, gNAttr, gNFastTri;
+/* q3-11: počty v rýchlej ceste (q3-12: bez meračov času vo vnútornej slučke) */
+static NVU32 gNPos, gNAttr, gNFastTri;
 
 static int draw_tris_fast(GLsizei count, GLenum type, const GLvoid *idx)
 {
@@ -2121,6 +2204,7 @@ static int draw_tris_fast(GLsizei count, GLenum type, const GLvoid *idx)
     GLint mn = 0x7fffffff, mx = -1, k;
     GLsizei i;
     int texActive, rep, repA, offs;
+    TexObj *tx0, *tx1;
 
     for (i = 0; i < count; i++) {
         k = type == GL_UNSIGNED_BYTE ? ((const GLubyte *)idx)[i] :
@@ -2139,7 +2223,9 @@ static int draw_tris_fast(GLsizei count, GLenum type, const GLvoid *idx)
     } else {
         return 0;
     }
-    texActive = active_tex() != 0;
+    tx0 = active_tex();
+    tx1 = active_tex1();
+    texActive = tx0 != 0;
     rep = texActive && (s->texEnv == GL_REPLACE || s->texEnv == GL_DECAL);
     repA = s->texEnv == GL_REPLACE && C->bound->hasAlpha;
     offs = s->polyOffsetFill && (s->polyFactor != 0 || s->polyUnits != 0);
@@ -2154,6 +2240,10 @@ static int draw_tris_fast(GLsizei count, GLenum type, const GLvoid *idx)
         gPrep.ccur = pack_rgba(C->cur[0], C->cur[1], C->cur[2], C->cur[3]);
         gPrep.rep = rep;
         gPrep.repA = repA;
+        gPrep.tex1 = tx1 != 0;
+        fastt = gPrep.tex1 && C->ta1.on && C->ta1.ptr && C->ta1.type == GL_FLOAT && C->ta1.size == 2;
+        gPrep.tp1 = fastt ? (const float *)C->ta1.ptr : 0;
+        gPrep.tstride1 = fastt ? (C->ta1.stride ? C->ta1.stride : 8) : 0;
         if (++gAGen == 0) {
             memset(gAStamp, 0, sizeof(gAStamp));
             gAGen = 1;
@@ -2169,9 +2259,7 @@ static int draw_tris_fast(GLsizei count, GLenum type, const GLvoid *idx)
                     type == GL_UNSIGNED_SHORT ? ((const GLushort *)idx)[q] : (GLint)((const GLuint *)idx)[q];
             c[j] = id[j] - gLcBase;
             if (gPStamp[c[j]] != gPGen) {
-                NVU32 t0 = tb();
                 lc_pos(c[j]);
-                gTPos += tb() - t0;
                 gNPos++;
             }
         }
@@ -2181,20 +2269,19 @@ static int draw_tris_fast(GLsizei count, GLenum type, const GLvoid *idx)
         if ((oa | ob | oc) & 0x3f) {
             V v[3];
             for (j = 0; j < 3; j++) {
-                float col[4], st[3];
+                float col[4], st[6];
                 attr_fetch(id[j], col, st);
                 v[j].x = gLC[c[j]][0]; v[j].y = gLC[c[j]][1]; v[j].z = gLC[c[j]][2]; v[j].w = gLC[c[j]][3];
                 v[j].r = col[0]; v[j].g = col[1]; v[j].b = col[2]; v[j].a = col[3];
                 v[j].s = st[0]; v[j].t = st[1]; v[j].q = st[2];
+                v[j].s1 = st[3]; v[j].t1 = st[4]; v[j].q1 = st[5];
             }
             tri(&v[0], &v[1], &v[2], &v[2]);
             continue;
         }
         for (j = 0; j < 3; j++)
             if (gAStamp[c[j]] != gAGen) {
-                NVU32 t0 = tb();
                 lc_attr(c[j]);
-                gTAttr += tb() - t0;
                 gNAttr++;
             }
         gNFastTri++;
@@ -2209,7 +2296,11 @@ static int draw_tris_fast(GLsizei count, GLenum type, const GLvoid *idx)
                     (s->cullFace == GL_FRONT && front))
                     continue;
             }
-            batch_begin(5, 3);
+            if (gPBn && (gPBprim != 5 || gPBtex != tx0 || gPBtex1 != tx1 || gPBn + 3 > PB_MAX))
+                gl_flush_batch();
+            gPBprim = 5;
+            gPBtex = tx0;
+            gPBtex1 = tx1;
             gPB[gPBn] = *pa;
             gPB[gPBn + 1] = *pb;
             gPB[gPBn + 2] = *pc;
@@ -2303,9 +2394,7 @@ static void enable(GLenum cap, int on)
         }
     }
     if (C->unit && cap == GL_TEXTURE_2D) {
-        C->tex2D1 = on;
-        if (on)
-            ONCE(0x58200000, "glEnable(GL_TEXTURE_2D) na jednotke %d ignorovane (bez multitextury)", C->unit);
+        C->tex2D1 = on;                             /* dávka sa prepne v batch_begin (active_tex1) */
         return;
     }
     p = cap_ptr(cap);
@@ -2607,7 +2696,8 @@ const GLubyte *glGetString(GLenum name)
     case GL_VENDOR:     return (const GLubyte *)"NVIDIA Corporation (NV34 MiniGL)";
     case GL_RENDERER:   return (const GLubyte *)"NV34 MiniGL GeForce FX Go5200";
     case GL_VERSION:    return (const GLubyte *)"1.1 NV34 MiniGL 1";
-    case GL_EXTENSIONS: return (const GLubyte *)"GL_EXT_compiled_vertex_array";
+    case GL_EXTENSIONS: return (const GLubyte *)(gMT ? "GL_ARB_multitexture GL_EXT_compiled_vertex_array" :
+                                                         "GL_EXT_compiled_vertex_array");
     }
     return 0;
 }
@@ -2638,7 +2728,7 @@ static int get_values(GLenum p, double *o)
     case GL_MAX_TEXTURE_SIZE: o[0] = 2048; return 1;
     case GL_MAX_MODELVIEW_STACK_DEPTH: case 0x0D38: case 0x0D39: o[0] = STACK_DEPTH; return 1;
     case 0x0D35:           o[0] = 8; return 1;                                         /* MAX_ATTRIB_STACK_DEPTH */
-    case 0x84E2:           o[0] = 1; return 1;                                         /* MAX_TEXTURE_UNITS_ARB */
+    case 0x84E2:           o[0] = gMT ? 2 : 1; return 1;                                         /* MAX_TEXTURE_UNITS_ARB */
     case 0x84E0:           o[0] = 0x84C0 + C->unit; return 1;                          /* ACTIVE_TEXTURE_ARB */
     case 0x84E1:           o[0] = 0x84C0 + C->cunit; return 1;                         /* CLIENT_ACTIVE_TEXTURE_ARB */
     case GL_DEPTH_BITS:    o[0] = C->depthBits ? (C->rt.z16 ? 16 : 24) : 0; return 1;
@@ -2784,6 +2874,8 @@ void gl_ctx_init(GLCtx *c)
     c->texIdentity = 1;
     c->cur[0] = c->cur[1] = c->cur[2] = c->cur[3] = 1.0f;
     c->curTex[3] = 1.0f;
+    c->curTex1[3] = 1.0f;
+    c->texEnv1 = GL_MODULATE;
     tex_init(&c->def, 0);
     c->bound = &c->def;
     c->unpackAlign = c->packAlign = 4;
@@ -2851,7 +2943,7 @@ void gl_frame_stats(void)
         NVU32 perMs = (NVU32)((double)dt * 60.0 / dticks / 1000.0);   /* tb na ms */
         unsigned long fps10 = (unsigned long)(gIvFrames * 600.0 / dticks);
         lg("snimky %d: %u.%u fps, ms/snimku: celkom %u.%02u, glEnd %u.%02u (z toho davky %u.%02u, cakanie GPU %u.%02u), swap %u.%02u; "
-           "MiniGL spolu %u.%02u ms (glFinish %d× %u.%02u ms); rychla cesta: %d troj., poz. %d (%u.%02u ms), atrib. %d (%u.%02u ms); DrawElements %d/%d pomalych (%u.%02u ms); orezanych %d troj. (%u.%02u ms, pas %u.%02u); "
+           "MiniGL spolu %u.%02u ms (glFinish %d× %u.%02u ms); rychla cesta: %d troj., poz. %d, atrib. %d; 2 textury %d troj.; DrawElements %d/%d pomalych (%u.%02u ms); orezanych %d troj. (%u.%02u ms, pas %u.%02u); "
            "%d troj./snimku, %d davok; nahrati %u (+%u ciastocnych, %u KB), sync %u; tb %u/ms",
            C->frames, fps10 / 10, fps10 % 10,
            ms100(dt, perMs, gIvFrames) / 100, ms100(dt, perMs, gIvFrames) % 100,
@@ -2861,9 +2953,8 @@ void gl_frame_stats(void)
            ms100(gTSwap, perMs, gIvFrames) / 100, ms100(gTSwap, perMs, gIvFrames) % 100,
            ms100(gTGL + gTSwap, perMs, gIvFrames) / 100, ms100(gTGL + gTSwap, perMs, gIvFrames) % 100,
            (long)(gFinishN / gIvFrames), ms100(gTFinish, perMs, gIvFrames) / 100, ms100(gTFinish, perMs, gIvFrames) % 100,
-           (long)(gNFastTri / gIvFrames), (long)(gNPos / gIvFrames),
-           ms100(gTPos, perMs, gIvFrames) / 100, ms100(gTPos, perMs, gIvFrames) % 100,
-           (long)(gNAttr / gIvFrames), ms100(gTAttr, perMs, gIvFrames) / 100, ms100(gTAttr, perMs, gIvFrames) % 100,
+           (long)(gNFastTri / gIvFrames), (long)(gNPos / gIvFrames), (long)(gNAttr / gIvFrames),
+           (long)(gStatMT / gIvFrames),
            gStatDE / gIvFrames, gStatDEslow / gIvFrames,
            ms100(gTVerts, perMs, gIvFrames) / 100, ms100(gTVerts, perMs, gIvFrames) % 100,
            gStatClip / gIvFrames, ms100(gTClip, perMs, gIvFrames) / 100, ms100(gTClip, perMs, gIvFrames) % 100,
@@ -2882,6 +2973,7 @@ void gl_frame_stats(void)
         gTClip = 0;
         gTGL = 0;
         gTFinish = gFinishN = 0;
-        gTPos = gTAttr = gNPos = gNAttr = gNFastTri = 0;
+        gNPos = gNAttr = gNFastTri = 0;
+        gStatMT = 0;
     }
 }

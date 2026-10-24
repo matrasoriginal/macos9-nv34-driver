@@ -610,3 +610,11 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
 - q3-10: **Quake III timedemo 48 fps** (z 34,8). glFinish v hre 0,1–0,8 ms (GPU už nebrzdí,
   v menu ~5 ms). CPU: MiniGL ~8–9 ms (rýchla cesta ~5, orezávanie ~1,5, dávky ~1), Q3 ~12 ms.
 - q3-11: rozpad rýchlej cesty: počet trojuholníkov, výpočtov pozícií a atribútov a ich čas.
+- q3-11 výsledok: v hre (≈4300 troj./snímku) pozície 6400 vrcholov ≈ 2,0 ms, atribúty ≈ 0,6 ms;
+  zvyšok rýchlej cesty ≈ 2 ms (indexy, skladanie, kópia do dávky), dávky do push buffra ≈ 1,2 ms.
+  Bez multitextúry Quake III kreslí každý povrch s lightmapou dvakrát.
+- q3-12: **GL_ARB_multitexture** (2 jednotky, jednotka 1 len GL_MODULATE). Fragment program
+  `TXP R1 ← t[1]; TXPH H0 ← t[0]; MULH H0 = H0·R1` na fpOffset + 0x100, combiners × primárna
+  farba ako pri jednej textúre. Vrchol 12 slov (tex1 = atribút 9), TEX_UNITS_ENABLE = 3, blok
+  textúry 1 na 0x1a20. Pri nahrávaní textúry jednotky 1 sa nevyhadzuje textúra jednotky 0
+  (gTexPin). boot-args `nv34glnomt` = bez multitextúry. Merače času z vnútornej slučky preč.

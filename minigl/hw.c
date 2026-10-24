@@ -39,17 +39,43 @@
 /* TXPH H0, a[tex0], t[0]; END (kódovanie pre BE 3D objekt, gl-5) */
 static const NVU32 kFpTex[4] = { 0x18009e81, 0x1c9dc801, 0x0001c800, 0x3fe1c800 };
 
+/* q3-12: dve textúry (GL_MODULATE na jednotke 1), combiners potom × primárna farba ako pri jednej:
+ *   TXP R1, a[tex1], t[1]
+ *   TXPH H0, a[tex0], t[0]
+ *   MULH H0, H0, R1; END
+ * Program leží za prvým (fpOffset + FP2_OFF). */
+#define FP2_OFF 0x100
+static const NVU32 kFpTex2[12] = {
+    0x1802be02, 0x1c9dc801, 0x0001c800, 0x3fe1c800,
+    0x18009e80, 0x1c9dc801, 0x0001c800, 0x3fe1c800,
+    0x02001e81, 0x1c9dc900, 0x0001c804, 0x3fe1c800,
+};
+
+/* ako nv3d_upload_fp (swapMode 1), na posunutie off */
+static void fp_upload(NVU32 off, const NVU32 *words, int count)
+{
+    volatile NVU32 *dst = (volatile NVU32 *)(S->g->a->vram + S->g->fpOffset + off);
+    int i;
+    for (i = 0; i < count; i++)
+        dst[i] = (words[i] << 16) | (words[i] >> 16);
+    __asm__ volatile("sync" ::: "memory");
+}
+
+HwTex *gTexPin;
+
 static NVU32 gFrame = 1, gEpoch = 1;
 static HwTex *gTexList;
 
 /* posledný nastavený hardvérový stav (-1 = neznámy) */
 static long hwMode = -1, hwBlend = -1, hwAlpha = -1, hwDepth = -1, hwMask = -1, hwScis = -1, hwFmt = -1;
 static long hwTex = -1, hwTexKey = -1, hwTexEpoch = -1;
+static long hwTex1 = -1, hwTex1Key = -1, hwTex1Epoch = -1;
 
 static void invalidate(void)
 {
     hwMode = hwBlend = hwAlpha = hwDepth = hwMask = hwScis = hwFmt = -1;
     hwTex = hwTexKey = hwTexEpoch = -1;
+    hwTex1 = hwTex1Key = hwTex1Epoch = -1;
 }
 
 /* hl-2: ak GPU neodpovedá (timeout pri čakaní na miesto v push buffri), ďalej nič nepísať —
@@ -181,6 +207,7 @@ int hw_bind(HwTarget *t)
     fresh = S->generation != t->generation;
     if (fresh) {
         nv3d_upload_fp(S->g, kFpTex, 4, 1);
+        fp_upload(FP2_OFF, kFpTex2, 12);
         t->generation = S->generation;
     }
     begin(M_RT_HORIZ, 5);
@@ -233,6 +260,14 @@ int hw_bind(HwTarget *t)
  * nv34glcolorle = opačné poradie. */
 static int gVtx12 = -1, gColorBE;
 
+static void vtx_init(void)
+{
+    if (gVtx12 < 0) {
+        gVtx12 = gl_boot_arg("nv34glvtx12");
+        gColorBE = !gl_boot_arg("nv34glcolorle");   /* opt-7: GPU číta R v najvyššom bajte */
+    }
+}
+
 static void set_vtxfmt(int tex)
 {
     int i;
@@ -244,23 +279,24 @@ static void set_vtxfmt(int tex)
         for (i = 0; i < 16; i++)
             data(i == 0 || i == 3 || (i == 8 && tex) ? f : 0x2);
     } else {
-        NVU32 st = (tex ? 32u : 16u) << 8;
+        NVU32 st = (tex == 2 ? 48u : tex ? 32u : 16u) << 8;   /* q3-12: 2 textúry = 12 slov */
         for (i = 0; i < 16; i++)
             data(i == 0 ? (0x2 | (3u << 4) | st) :           /* V32_FLOAT × 3 */
                  i == 3 ? (0x4 | (4u << 4) | st) :           /* U8_UNORM × 4 */
-                 (i == 8 && tex) ? (0x2 | (4u << 4) | st) : 0x2);
+                 (i == 8 && tex) ? (0x2 | (4u << 4) | st) :
+                 (i == 9 && tex == 2) ? (0x2 | (4u << 4) | st) : 0x2);
     }
     hwFmt = tex;
 }
 
-static NVU32 tex_filter(const HwState *st, const HwTex *t)
+static NVU32 tex_filter(GLenum minFilter, GLenum magFilter, const HwTex *t)
 {
-    NVU32 mag = st->magFilter == GL_NEAREST ? 0x01000000 : 0x02000000, min;
+    NVU32 mag = magFilter == GL_NEAREST ? 0x01000000 : 0x02000000, min;
     if (t->levels <= 1) {
-        min = (st->minFilter == GL_NEAREST || st->minFilter == GL_NEAREST_MIPMAP_NEAREST ||
-               st->minFilter == GL_NEAREST_MIPMAP_LINEAR) ? 0x00010000 : 0x00020000;
+        min = (minFilter == GL_NEAREST || minFilter == GL_NEAREST_MIPMAP_NEAREST ||
+               minFilter == GL_NEAREST_MIPMAP_LINEAR) ? 0x00010000 : 0x00020000;
     } else {
-        switch (st->minFilter) {
+        switch (minFilter) {
         case GL_NEAREST:                min = 0x00010000; break;
         case GL_LINEAR:                 min = 0x00020000; break;
         case GL_NEAREST_MIPMAP_NEAREST: min = 0x00030000; break;
@@ -300,37 +336,59 @@ static void set_scissor(HwTarget *t, const HwState *st)
     hwScis = key;
 }
 
-/* vráti 1, ak sa kreslí s textúrou (textúra je vo VRAM) */
+/* textúrová jednotka u (blok metód 0x1a00 + 0x20·u), stav v cTex, cKey, cEpoch */
+static void tex_unit(int u, HwTex *x, GLenum minF, GLenum magF, GLenum ws, GLenum wt, long *cTex, long *cKey,
+                     long *cEpoch)
+{
+    NVU32 filt = tex_filter(minF, magF, x);
+    NVU32 wrap = wrap_mode(ws) | (wrap_mode(wt) << 8) | (1u << 16);
+    long key = (long)(filt ^ (wrap << 4));
+    if (*cTex != (long)x || *cKey != key || *cEpoch != (long)gEpoch) {
+        begin(M_TEX_OFFSET0 + 0x20 * u, 8);
+        data(x->off);
+        data(0x08 | 0x20 | ((NVU32)x->fmt << 8) | (1u << 16) | (x->levels > 1 ? 0x00080000 : 0) |
+             ((NVU32)x->log2w << 20) | ((NVU32)x->log2h << 24) | 0x01);
+        data(wrap);
+        data(0x40000000 | ((((NVU32)x->levels - 1) << 8) << 6));
+        data(0xAAE4);
+        data(filt);
+        data(((NVU32)x->w << 16) | (NVU32)x->h);
+        data(0);
+        *cTex = (long)x;
+        *cKey = key;
+        *cEpoch = gEpoch;
+    }
+    x->frameUsed = gFrame;
+    x->lastUse = gFrame;
+}
+
+/* vráti 0 bez textúry, 1 s textúrou, 2 s dvoma (textúry sú vo VRAM) */
 int hw_state(HwTarget *t, const HwState *st)
 {
     long key;
     int mode = st->tex && tex_resident(st->tex);
 
+    /* q3-12: druhá jednotka (nie s pôvodným 12-slovným formátom nv34glvtx12) */
+    vtx_init();
+    if (mode && st->tex1 && tex_resident(st->tex1) && !gVtx12)
+        mode = 2;
     /* textúra */
     if (mode) {
-        HwTex *x = st->tex;
-        NVU32 filt = tex_filter(st, x);
-        NVU32 wrap = wrap_mode(st->wrapS) | (wrap_mode(st->wrapT) << 8) | (1u << 16);
-        key = (long)(filt ^ (wrap << 4));
-        if (hwTex != (long)x || hwTexKey != key || hwTexEpoch != (long)gEpoch) {
-            begin(M_TEX_OFFSET0, 8);
-            data(x->off);
-            data(0x08 | 0x20 | ((NVU32)x->fmt << 8) | (1u << 16) | (x->levels > 1 ? 0x00080000 : 0) |
-                 ((NVU32)x->log2w << 20) | ((NVU32)x->log2h << 24) | 0x01);
-            data(wrap);
-            data(0x40000000 | ((((NVU32)x->levels - 1) << 8) << 6));
-            data(0xAAE4);
-            data(filt);
-            data(((NVU32)x->w << 16) | (NVU32)x->h);
-            data(0);
-            hwTex = (long)x;
-            hwTexKey = key;
-            hwTexEpoch = gEpoch;
-        }
-        x->frameUsed = gFrame;
-        x->lastUse = gFrame;
+        tex_unit(0, st->tex, st->minFilter, st->magFilter, st->wrapS, st->wrapT, &hwTex, &hwTexKey, &hwTexEpoch);
+        if (mode == 2)
+            tex_unit(1, st->tex1, st->minFilter1, st->magFilter1, st->wrapS1, st->wrapT1, &hwTex1, &hwTex1Key,
+                     &hwTex1Epoch);
     }
     if (hwMode != mode) {
+        if (hwMode == 2 || hwMode < 0) {            /* jednotku 1 vypnúť, späť program s jednou textúrou */
+            begin(M_TEX_OFFSET0 + 0x20 + 0x0c, 1);
+            data(0);
+            hwTex1 = -1;
+        }
+        if (mode == 2 || hwMode == 2 || hwMode < 0) {
+            begin(M_FP_ACTIVE_PROGRAM, 1);
+            data((S->g->fpOffset + (mode == 2 ? FP2_OFF : 0)) | 1);
+        }
         if (!mode) {
             begin(M_TEX_UNITS_ENABLE, 1);
             data(0);
@@ -340,8 +398,8 @@ int hw_state(HwTarget *t, const HwState *st)
             data(0x01000101);
         } else {
             begin(M_TEX_UNITS_ENABLE, 1);
-            data(1);
-            begin(M_RC_IN_ALPHA0, 6);               /* tex0 × primárna → spare0 */
+            data(mode == 2 ? 3 : 1);                /* interpolované súradnice tex0 (a tex1) */
+            begin(M_RC_IN_ALPHA0, 6);               /* tex0 (pri dvoch tex0 × tex1 z programu) × primárna → spare0 */
             data((0x18u << 24) | (0x14u << 16));
             data((0x08u << 24) | (0x04u << 16));
             data(0);
@@ -444,11 +502,8 @@ void hw_draw(int prim, const HwVtx *v, int n, int textured)
     NVU32 wpv, left = n, cnt, i;
     if (n <= 0)
         return;
-    if (gVtx12 < 0) {
-        gVtx12 = gl_boot_arg("nv34glvtx12");
-        gColorBE = !gl_boot_arg("nv34glcolorle");   /* opt-7: GPU číta R v najvyššom bajte */
-    }
-    wpv = gVtx12 ? (textured ? 12 : 8) : (textured ? 8 : 4);
+    vtx_init();
+    wpv = gVtx12 ? (textured ? 12 : 8) : (textured == 2 ? 12 : textured ? 8 : 4);
     set_vtxfmt(textured);
     begin(M_VERTEX_BEGIN_END, 1);
     data(prim);
@@ -478,6 +533,13 @@ void hw_draw(int prim, const HwVtx *v, int n, int textured)
                 } else {
                     p += 8;
                 }
+            }
+        } else if (textured == 2) {
+            for (i = 0; i < cnt; i++, v++, p += 12) {
+                p[0] = v->x; p[1] = v->y; p[2] = v->z;
+                ((volatile NVU32 *)p)[3] = vcolor(v);
+                p[4] = v->sq; p[5] = v->tq; p[6] = 0.0f; p[7] = v->q;
+                p[8] = v->sq1; p[9] = v->tq1; p[10] = 0.0f; p[11] = v->q1;
             }
         } else if (textured) {
             for (i = 0; i < cnt; i++, v++, p += 8) {
@@ -635,6 +697,8 @@ void hw_tex_free(HwTex *t)
     t->magic = 0;
     if ((NVU32)hwTex == (NVU32)t)
         hwTex = -1;
+    if ((NVU32)hwTex1 == (NVU32)t)
+        hwTex1 = -1;
     DisposePtr((Ptr)t);
 }
 
@@ -653,7 +717,7 @@ static NVU32 alloc_evict(HwTex *t, NVU32 size)
         while (!off) {
             lru = 0;
             for (v = gTexList; v; v = v->next)
-                if (v != t && (v->off || v->alt) && (!lru || v->lastUse < lru->lastUse))
+                if (v != t && v != gTexPin && (v->off || v->alt) && (!lru || v->lastUse < lru->lastUse))
                     lru = v;
             if (!lru)
                 break;

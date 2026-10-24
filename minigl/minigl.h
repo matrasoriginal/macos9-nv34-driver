@@ -56,13 +56,15 @@ typedef struct HwState {
     HwTex  *tex;                    /* NULL = bez textúry */
     int     texEnv;                 /* GL_MODULATE / GL_REPLACE / … */
     GLenum  minFilter, magFilter, wrapS, wrapT;
+    HwTex  *tex1;                   /* q3-12: jednotka 1 (GL_MODULATE), NULL = len jedna textúra */
+    GLenum  minFilter1, magFilter1, wrapS1, wrapT1;
 } HwState;
 
 int     hw_init(void);                                  /* 1 = GPU pripravené */
 int     hw_target_alloc(HwTarget *t, int w, int h, int bpp, int zbits);
 void    hw_target_free(HwTarget *t);
 int     hw_bind(HwTarget *t);
-int     hw_state(HwTarget *t, const HwState *st);    /* 1 = s textúrou */
+int     hw_state(HwTarget *t, const HwState *st);    /* 0 bez textúry, 1 s textúrou, 2 s dvoma */
 void    hw_clear(HwTarget *t, int color, int depth, NVU32 argb, NVU32 zval, const HwState *st);  /* zval Z24S8 */
 void    hw_kick(void);
 int     hw_sync(void);
@@ -73,7 +75,8 @@ NVU32   hw_frame(void);
 
 /* vrcholy v súradniciach RT: x, y, z (0..1), farba 0..1, s/q, t/q, q */
 /* c = farba R<<24|G<<16|B<<8|A (wolf-3: zabalená raz, hw_draw ju zapisuje priamo) */
-typedef struct HwVtx { float x, y, z, r, g, b, a, sq, tq, q; NVU32 c; } HwVtx;
+/* sq1, tq1, q1 = jednotka 1 (q3-12) */
+typedef struct HwVtx { float x, y, z, r, g, b, a, sq, tq, q; NVU32 c; float sq1, tq1, q1; } HwVtx;
 
 static inline NVU32 ubyte_f(float f)
 {
@@ -88,12 +91,13 @@ static inline NVU32 pack_rgba(float r, float g, float b, float a)
 {
     return (ubyte_f(r) << 24) | (ubyte_f(g) << 16) | (ubyte_f(b) << 8) | ubyte_f(a);
 }
-void    hw_draw(int prim, const HwVtx *v, int n, int textured);  /* prim: 1 body, 2 čiary, 5 trojuholníky */
+void    hw_draw(int prim, const HwVtx *v, int n, int textured);  /* prim: 1 body, 2 čiary, 5 trojuholníky; textured 0/1/2 */
 
 /* textúra: celý reťazec mipmáp v ARGB32 (úroveň 0 prvá), voliteľne iba úroveň 0 */
 HwTex  *hw_tex_new(void);
 void    hw_tex_free(HwTex *t);
 int     hw_tex_resident(HwTex *t);                      /* 0 = treba nahrať (nová / vyhodená) */
+extern HwTex *gTexPin;                                  /* q3-12: túto textúru nevyhadzovať (druhá jednotka sa práve nahráva) */
 int     hw_tex_subupload(HwTex *t, int x, int y, int w, int h, const void *src, int stride, int srcfmt);
 extern NVU32 gHwUploads, gHwUploadBytes, gHwSubUploads, gHwSyncs;
 
@@ -132,7 +136,8 @@ typedef struct TexObj {
 } TexObj;
 
 /* vrchol v clip súradniciach */
-typedef struct V { float x, y, z, w, r, g, b, a, s, t, q; } V;
+typedef struct V { float x, y, z, w, r, g, b, a, s, t, q, s1, t1, q1; } V;   /* s1… jednotka 1 */
+#define V_FLOATS 14
 
 typedef struct Arr { int on, size; GLenum type; int stride; const void *ptr; } Arr;
 
@@ -176,12 +181,12 @@ typedef struct GLCtx {
     float   mvp[16]; int mvpDirty, texIdentity;
     float   cur[4], curTex[4];              /* farba, s t r q */
     TexObj *bound, def;
-    /* q3-4: textúrová jednotka 1 (Quake III volá glActiveTextureARB aj bez rozšírenia) —
-     * jej stav sa ukladá zvlášť a kreslenie neovplyvňuje */
+    /* q3-4: textúrová jednotka 1; q3-12: kreslí sa s ňou (GL_ARB_multitexture, len GL_MODULATE) */
     int     unit, cunit, tex2D1;
     TexObj *bound1;
     GLenum  texEnv1;
     Arr     ta1;
+    float   curTex1[4];
     int     unpackAlign, unpackRowLength, packAlign;
     Arr     va, ca, ta, na;
     /* glBegin/glEnd */

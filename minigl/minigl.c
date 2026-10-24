@@ -2917,17 +2917,59 @@ static unsigned long ms100(NVU32 t, NVU32 perMs, long frames)
     return perMs && frames ? (unsigned long)((double)t * 100.0 / perMs / frames) : 0;
 }
 
-/* q3-13: skutočný takt CPU — 4 závislé sčítania na iteráciu (latencia 1 takt na G4) */
-static NVU32 cpu_mhz(NVU32 perMs)
+/* q3-13/14: skutočný takt CPU — rozdiel slučiek s 12 a 4 závislými sčítaniami = 8 taktov na
+ * iteráciu (réžia slučky sa odčíta) */
+static NVU32 loop_tb(int twelve)
 {
     NVU32 t0, t1, x = 1;
     long n = 1000000;
     t0 = tb();
-    __asm__ volatile("mtctr %1\n"
-                     "1: add %0,%0,%0\n add %0,%0,%0\n add %0,%0,%0\n add %0,%0,%0\n bdnz 1b"
-                     : "+r"(x) : "r"(n) : "ctr");
+    if (twelve)
+        __asm__ volatile("mtctr %1\n"
+                         "1: add %0,%0,%0\n add %0,%0,%0\n add %0,%0,%0\n add %0,%0,%0\n"
+                         " add %0,%0,%0\n add %0,%0,%0\n add %0,%0,%0\n add %0,%0,%0\n"
+                         " add %0,%0,%0\n add %0,%0,%0\n add %0,%0,%0\n add %0,%0,%0\n bdnz 1b"
+                         : "+r"(x) : "r"(n) : "ctr");
+    else
+        __asm__ volatile("mtctr %1\n"
+                         "1: add %0,%0,%0\n add %0,%0,%0\n add %0,%0,%0\n add %0,%0,%0\n bdnz 1b"
+                         : "+r"(x) : "r"(n) : "ctr");
     t1 = tb();
-    return t1 != t0 ? (NVU32)(4000.0 * perMs / (t1 - t0)) : 0;
+    return t1 - t0;
+}
+
+static NVU32 cpu_mhz(NVU32 perMs)
+{
+    NVU32 a = loop_tb(0), b = loop_tb(1);
+    return b > a ? (NVU32)(8000.0 * perMs / (b - a)) : 0;
+}
+
+/* vlastnosti uzla procesora v Name Registry (takt, znížený takt, power step) */
+static void cpu_props(void)
+{
+    static const char *paths[] = { "Devices:device-tree:cpus:PowerPC,G4@0", "Devices:device-tree:cpus:PowerPC,G4",
+                                   "Devices:device-tree:cpus:PowerPC,G4@1", 0 };
+    static const char *props[] = { "clock-frequency", "max-clock-frequency", "reduced-clock-frequency",
+                                   "min-clock-frequency", "dynamic-power-step", "bus-frequency",
+                                   "timebase-frequency", "cpu-version", "frequency-gpio", "voltage-gpio", 0 };
+    RegEntryID e;
+    int i, j;
+    long pclk = 0;
+    Gestalt('pclk', &pclk);
+    lg("Gestalt pclk %u Hz", (NVU32)pclk);
+    for (i = 0; paths[i]; i++) {
+        if (RegistryCStrEntryLookup(0, paths[i], &e) != 0)
+            continue;
+        for (j = 0; props[j]; j++) {
+            NVU32 v[4] = { 0, 0, 0, 0 };
+            UInt32 size = sizeof(v);
+            if (RegistryPropertyGet(&e, props[j], v, &size) == 0)
+                lg("%s %s = %x (%u), %u B", paths[i] + 26, props[j], v[0], v[0], (NVU32)size);
+        }
+        RegistryEntryIDDispose(&e);
+        return;
+    }
+    lg("uzol CPU v Name Registry nenajdeny");
 }
 
 void gl_frame_stats(void)
@@ -2959,6 +3001,7 @@ void gl_frame_stats(void)
         if (!mhzDone) {
             mhzDone = 1;
             lg("CPU: ~%u MHz (meranie), ~%u MHz (druhe meranie)", cpu_mhz(perMs), cpu_mhz(perMs));
+            cpu_props();
         }
         lg("snimky %d: %u.%u fps, ms/snimku: celkom %u.%02u, glEnd %u.%02u (z toho davky %u.%02u, cakanie GPU %u.%02u), swap %u.%02u; "
            "MiniGL spolu %u.%02u ms (glFinish %d× %u.%02u ms); rychla cesta: %d troj., poz. %d, atrib. %d; 2 textury %d troj.; DrawElements %d/%d pomalych (%u.%02u ms); orezanych %d troj. (%u.%02u ms, pas %u.%02u); "

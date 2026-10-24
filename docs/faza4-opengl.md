@@ -591,3 +591,8 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
 - wolf-4: bez zlepšenia (glEnd 8–10 ms pri ~3200–3700 troj.). Podozrenie: ochranný pás 1,01
   (od minigl-5) → každý trojuholník presahujúci okraj ide cez clip_poly + emit_poly. wolf-5:
   štatistika orezaných trojuholníkov a ich času, pás cez boot-args `nv34glguard2` / `nv34glguard4`.
+- wolf-5: orezávanie ~1,2 ms (pás 1,01) vs 0,3 ms (pás 2 — v Q2 sa vráti čierna čiara) → pás
+  ostáva 1,01. Doterajšie „samotná hra“ = všetko mimo glEnd/DrawElements/swap, teda aj ostatné
+  GL volania. Porovnanie: G4 1,25 GHz s Q3 v 640×480 ~87 fps (OS X, novšia verzia hry).
+- q3-8: celkový čas vo všetkých funkciách MiniGL (CHECK → atribút cleanup, hĺbka vnorenia) v
+  štatistike „MiniGL spolu“; log taktu GPU (NVPLL/MPLL) pri inicializácii.

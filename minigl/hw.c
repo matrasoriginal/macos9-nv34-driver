@@ -120,6 +120,18 @@ int hw_init(void)
         ref_emit(0);
         hw_sync();
         lg("GPU fence (REF_CNT): %s", gRefOK ? "ok" : "nefunguje");
+        {
+            /* q3-8: takt jadra a pamäte (PLL ako v nouveau nv04_pm / nv30: f = krystal × N / M >> P;
+             * NV31+ môže mať druhý stupeň v *_COEFF_B) — či GPU nebeží v úspornom režime */
+            NVU32 boot = nva_rd32(S->a, 0x101000);
+            NVU32 xtal = (boot & 0x40) ? 14318 : 13500;    /* kHz */
+            NVU32 n1 = nva_rd32(S->a, 0x680500), n2 = nva_rd32(S->a, 0x680570);
+            NVU32 m1 = nva_rd32(S->a, 0x680504), m2 = nva_rd32(S->a, 0x680574);
+            NVU32 nm = n1 & 0xff, nn = (n1 >> 8) & 0xff, np = (n1 >> 16) & 7;
+            NVU32 mm = m1 & 0xff, mn = (m1 >> 8) & 0xff, mp = (m1 >> 16) & 7;
+            lg("PLL: jadro %x/%x (~%u MHz), pamat %x/%x (~%u MHz), krystal %u kHz", n1, n2,
+               nm ? (xtal * nn / nm >> np) / 1000 : 0, m1, m2, mm ? (xtal * mn / mm >> mp) / 1000 : 0, xtal);
+        }
     }
     return 1;
 }

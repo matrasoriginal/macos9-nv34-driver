@@ -291,7 +291,14 @@ void stub_hit(const char *name, NVU32 idx)
 }
 
 #define ONCE(key, ...) do { if (first_time(key)) lg(__VA_ARGS__); } while (0)
-#define CHECK() do { if (!C) return; } while (0)
+/* q3-8: celkový čas vo funkciách MiniGL (vnorené volania sa nerátajú dvakrát) — atribút cleanup
+ * zavolá gl_leave pri každom výstupe z funkcie */
+static int gGlDepth;
+static NVU32 gGlT0, gTGL;
+static inline NVU32 gl_enter(void) { if (gGlDepth++ == 0) gGlT0 = tb(); return 0; }
+static inline void gl_leave(NVU32 *u) { (void)u; if (--gGlDepth == 0) gTGL += tb() - gGlT0; }
+#define GLT NVU32 __attribute__((cleanup(gl_leave))) _glt = gl_enter()
+#define CHECK() GLT; if (!C) return
 #define FLUSH() gl_flush_batch()
 
 static void set_err(GLenum e)
@@ -1666,6 +1673,7 @@ void glEnd(void)
 
 static void vertex4(float x, float y, float z, float w)
 {
+    GLT;
     const float *m;
     V *v;
 
@@ -1699,6 +1707,7 @@ static void vertex4(float x, float y, float z, float w)
 
 static void color4(float r, float g, float b, float a)
 {
+    GLT;
     if (!C)
         return;
     C->cur[0] = r; C->cur[1] = g; C->cur[2] = b; C->cur[3] = a;
@@ -1706,6 +1715,7 @@ static void color4(float r, float g, float b, float a)
 
 static void texc(float s, float t, float r, float q)
 {
+    GLT;
     if (!C)
         return;
     C->curTex[0] = s; C->curTex[1] = t; C->curTex[2] = r; C->curTex[3] = q;
@@ -2815,6 +2825,7 @@ void gl_frame_stats(void)
         gStatTris = gStatBatches = 0;
         gTEnd = gTFlush = gTWait = gTSwap = 0;
         gHwUploads = gHwSubUploads = gHwUploadBytes = gHwSyncs = 0;
+        gTGL = 0;
         return;
     }
     if (gStatsOn && gIvFrames >= 250 && ticks - gIvTicks >= 30) {
@@ -2822,7 +2833,7 @@ void gl_frame_stats(void)
         NVU32 perMs = (NVU32)((double)dt * 60.0 / dticks / 1000.0);   /* tb na ms */
         unsigned long fps10 = (unsigned long)(gIvFrames * 600.0 / dticks);
         lg("snimky %d: %u.%u fps, ms/snimku: celkom %u.%02u, glEnd %u.%02u (z toho davky %u.%02u, cakanie GPU %u.%02u), swap %u.%02u; "
-           "DrawElements %d/%d pomalych (%u.%02u ms); orezanych %d troj. (%u.%02u ms, pas %u.%02u); "
+           "MiniGL spolu %u.%02u ms; DrawElements %d/%d pomalych (%u.%02u ms); orezanych %d troj. (%u.%02u ms, pas %u.%02u); "
            "%d troj./snimku, %d davok; nahrati %u (+%u ciastocnych, %u KB), sync %u; tb %u/ms",
            C->frames, fps10 / 10, fps10 % 10,
            ms100(dt, perMs, gIvFrames) / 100, ms100(dt, perMs, gIvFrames) % 100,
@@ -2830,6 +2841,7 @@ void gl_frame_stats(void)
            ms100(gTFlush, perMs, gIvFrames) / 100, ms100(gTFlush, perMs, gIvFrames) % 100,
            ms100(gTWait, perMs, gIvFrames) / 100, ms100(gTWait, perMs, gIvFrames) % 100,
            ms100(gTSwap, perMs, gIvFrames) / 100, ms100(gTSwap, perMs, gIvFrames) % 100,
+           ms100(gTGL + gTSwap, perMs, gIvFrames) / 100, ms100(gTGL + gTSwap, perMs, gIvFrames) % 100,
            gStatDE / gIvFrames, gStatDEslow / gIvFrames,
            ms100(gTVerts, perMs, gIvFrames) / 100, ms100(gTVerts, perMs, gIvFrames) % 100,
            gStatClip / gIvFrames, ms100(gTClip, perMs, gIvFrames) / 100, ms100(gTClip, perMs, gIvFrames) % 100,
@@ -2846,5 +2858,6 @@ void gl_frame_stats(void)
         gTVerts = 0;
         gStatClip = 0;
         gTClip = 0;
+        gTGL = 0;
     }
 }

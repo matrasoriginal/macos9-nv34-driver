@@ -690,9 +690,17 @@ static float zclamp(float z)
 
 /* rave-23: vrcholy ako inline pole (VERTEX_DATA, non-increment) — jedna hlavička na dávku
  * namiesto 2–3 hlavičiek na vrchol. Poradie atribútov podľa indexu: pozícia (0), farba (3),
- * textúra (8). boot-args nv34immediate = pôvodné VTX_ATTR metódy. */
-static int gImmediate;
-static NVU32 gVwLeft, gVwHdr, gVwWords;
+ * textúra (8). boot-args nv34immediate = pôvodné VTX_ATTR metódy.
+ * rave-25 (ako MiniGL opt-1 a q3-17): vrchol sa zapisuje priamo do miesta rezervovaného v push
+ * buffri (bez volania nva_push na slovo) a je kratší — pozícia x, y, z (w = 1 doplní GPU), farba
+ * U8 × 4 v jednom slove (R v najvyššom bajte) → 8 slov s textúrou (predtým 12), 4 bez nej (8).
+ * boot-args nv34ravelong = pôvodný 12/8-slovný vrchol. */
+static int gImmediate, gLong, gStats;
+static NVU32 gVwLeft, gVwHdr, gVwWords, gVwBad;
+static NVU32 gVwDummy[12];
+
+#define WPV_G   (gLong ? 8u : 4u)
+#define WPV_T   (gLong ? 12u : 8u)
 
 static void vw_start(NVU32 n, NVU32 wpv)
 {
@@ -701,43 +709,68 @@ static void vw_start(NVU32 n, NVU32 wpv)
     gVwWords = wpv;
 }
 
-static void vw_next(void)
+/* miesto pre ďalší vrchol (gVwWords slov) */
+static volatile NVU32 *vw_next(void)
 {
+    volatile NVU32 *p;
     if (!gVwHdr) {
         NVU32 cnt = 2047 / gVwWords;
         if (cnt > gVwLeft)
             cnt = gVwLeft;
-        nva_begin(S->a, SUBC, 0x40000000 | 0x1818, cnt * gVwWords);
+        gVwBad = nva_begin(S->a, SUBC, 0x40000000 | 0x1818, cnt * gVwWords) != kNVAOK;
         gVwHdr = cnt;
     }
     gVwHdr--;
     gVwLeft--;
+    if (gVwBad)                                     /* GPU neodpovedá: miesto nie je rezervované */
+        return gVwDummy;
+    p = S->a->dmaBase + S->a->dmaCurrent;
+    S->a->dmaCurrent += gVwWords;
+    return p;
 }
 
 static void set_vtxfmt(Ctx *c, int tex)
 {
-    NVU32 stride = tex ? 48 : 32, f = 0x2 | (4u << 4) | (stride << 8);
+    NVU32 st;
     int i;
     if (gImmediate || c->hwFmt == tex)
         return;
     begin(0x1740, 16);                              /* VTXFMT(0..15) */
-    for (i = 0; i < 16; i++)
-        data(i == 0 || i == 3 || (i == 8 && tex) ? f : 0x2);
+    if (gLong) {
+        st = (tex ? 48u : 32u) << 8;
+        for (i = 0; i < 16; i++)
+            data(i == 0 || i == 3 || (i == 8 && tex) ? (0x2 | (4u << 4) | st) : 0x2);
+    } else {
+        st = (tex ? 32u : 16u) << 8;
+        for (i = 0; i < 16; i++)
+            data(i == 0 ? (0x2 | (3u << 4) | st) :           /* V32_FLOAT × 3 */
+                 i == 3 ? (0x4 | (4u << 4) | st) :           /* U8_UNORM × 4 */
+                 (i == 8 && tex) ? (0x2 | (4u << 4) | st) : 0x2);
+    }
     c->hwFmt = tex;
+}
+
+static inline NVU32 pack_rgba(float r, float g, float b, float a)
+{
+    return (ubyte(r) << 24) | (ubyte(g) << 16) | (ubyte(b) << 8) | ubyte(a);
 }
 
 static void vtx_g(const TQAVGouraud *v)
 {
     if (!gImmediate) {
-        vw_next();
-        dataf(v->x);
-        dataf(v->y);
-        dataf(zclamp(v->z));
-        dataf(kOne);
-        dataf(v->r);
-        dataf(v->g);
-        dataf(v->b);
-        dataf(v->a);
+        volatile NVU32 *p = vw_next();
+        p[0] = fbits(v->x);
+        p[1] = fbits(v->y);
+        p[2] = fbits(zclamp(v->z));
+        if (gLong) {
+            p[3] = fbits(kOne);
+            p[4] = fbits(v->r);
+            p[5] = fbits(v->g);
+            p[6] = fbits(v->b);
+            p[7] = fbits(v->a);
+        } else {
+            p[3] = pack_rgba(v->r, v->g, v->b, v->a);
+        }
         return;
     }
     begin(M_VTX_ATTR_4F(3), 4);
@@ -766,25 +799,25 @@ static void vtx_t(Ctx *c, const TQAVTexture *v)
     if (op & ~kQATextureOp_Modulate && first_time(0xF1000000 | op))
         lg("textureOp %x (Highlight/Decal zatial nie)", op);
     if (!gImmediate) {
-        vw_next();
-        dataf(v->x);
-        dataf(v->y);
-        dataf(zclamp(v->z));
-        dataf(kOne);
-        if (op & kQATextureOp_Modulate) {
-            dataf(v->kd_r);
-            dataf(v->kd_g);
-            dataf(v->kd_b);
+        volatile NVU32 *p = vw_next();
+        int mod = (op & kQATextureOp_Modulate) != 0;
+        p[0] = fbits(v->x);
+        p[1] = fbits(v->y);
+        p[2] = fbits(zclamp(v->z));
+        if (gLong) {
+            p[3] = fbits(kOne);
+            p[4] = fbits(mod ? v->kd_r : kOne);
+            p[5] = fbits(mod ? v->kd_g : kOne);
+            p[6] = fbits(mod ? v->kd_b : kOne);
+            p[7] = fbits(v->a);
+            p += 4;
         } else {
-            dataf(kOne);
-            dataf(kOne);
-            dataf(kOne);
+            p[3] = mod ? pack_rgba(v->kd_r, v->kd_g, v->kd_b, v->a) : (0xFFFFFF00u | ubyte(v->a));
         }
-        dataf(v->a);
-        dataf(v->uOverW);
-        dataf(v->vOverW);
-        dataf(0.0f);
-        dataf(v->invW);
+        p[4] = fbits(v->uOverW);                    /* projektívna súradnica: TXP delí q */
+        p[5] = fbits(v->vOverW);
+        p[6] = 0;
+        p[7] = fbits(v->invW);
         return;
     }
     begin(M_VTX_ATTR_4F(3), 4);
@@ -1116,7 +1149,7 @@ static void DrawPoint(const TQADrawContext *dc, const TQAVGouraud *v)
     if (!prepare(c, MODE_GOURAUD))
         return;
     prim_begin(PRIM_POINTS);
-    vw_start(1, 8);
+    vw_start(1, WPV_G);
     vtx_g(v);
     prim_end();
 }
@@ -1130,7 +1163,7 @@ static void DrawLine(const TQADrawContext *dc, const TQAVGouraud *v0, const TQAV
     if (!prepare(c, MODE_GOURAUD))
         return;
     prim_begin(PRIM_LINES);
-    vw_start(2, 8);
+    vw_start(2, WPV_G);
     vtx_g(v0);
     vtx_g(v1);
     prim_end();
@@ -1148,7 +1181,7 @@ static void DrawTriGouraud(const TQADrawContext *dc, const TQAVGouraud *v0, cons
     if (!prepare(c, MODE_GOURAUD))
         return;
     prim_begin(PRIM_TRIANGLES);
-    vw_start(3, 8);
+    vw_start(3, WPV_G);
     vtx_g(v0);
     vtx_g(v1);
     vtx_g(v2);
@@ -1169,7 +1202,7 @@ static void DrawTriTexture(const TQADrawContext *dc, const TQAVTexture *v0, cons
     if (!prepare(c, MODE_TEXTURE))
         return;
     prim_begin(PRIM_TRIANGLES);
-    vw_start(3, 12);
+    vw_start(3, WPV_T);
     vtx_t(c, v0);
     vtx_t(c, v1);
     vtx_t(c, v2);
@@ -1190,7 +1223,7 @@ static void DrawVGouraud(const TQADrawContext *dc, unsigned long n, long mode, c
     if (!n || !prepare(c, MODE_GOURAUD))
         return;
     prim_begin(vmode_prim(mode));
-    vw_start(n, 8);
+    vw_start(n, WPV_G);
     for (i = 0; i < n; i++)
         vtx_g(&v[i]);
     prim_end();
@@ -1210,7 +1243,7 @@ static void DrawVTexture(const TQADrawContext *dc, unsigned long n, long mode, c
     if (!n || !prepare(c, MODE_TEXTURE))
         return;
     prim_begin(vmode_prim(mode));
-    vw_start(n, 12);
+    vw_start(n, WPV_T);
     for (i = 0; i < n; i++)
         vtx_t(c, &v[i]);
     prim_end();
@@ -1240,7 +1273,7 @@ static void DrawTriMeshGouraud(const TQADrawContext *dc, unsigned long n, const 
     if (!n || !c->vg || !prepare(c, MODE_GOURAUD))
         return;
     prim_begin(PRIM_TRIANGLES);
-    vw_start(3 * n, 8);
+    vw_start(3 * n, WPV_G);
     for (i = 0; i < n; i++)
         for (k = 0; k < 3; k++)
             vtx_g(&c->vg[t[i].vertices[k] < c->nvg ? t[i].vertices[k] : 0]);
@@ -1259,7 +1292,7 @@ static void DrawTriMeshTexture(const TQADrawContext *dc, unsigned long n, const 
     if (!n || !c->vt || !prepare(c, MODE_TEXTURE))
         return;
     prim_begin(PRIM_TRIANGLES);
-    vw_start(3 * n, 12);
+    vw_start(3 * n, WPV_T);
     for (i = 0; i < n; i++)
         for (k = 0; k < 3; k++)
             vtx_t(c, &c->vt[t[i].vertices[k] < c->nvt ? t[i].vertices[k] : 0]);
@@ -1310,7 +1343,7 @@ static void DrawBitmap(const TQADrawContext *dc, const TQAVGouraud *v, TQABitmap
     c->si[kQATag_TextureOp] = t->pixelType == kQAPixel_Alpha1 ? kQATextureOp_Modulate : kQATextureOp_None;
     if (prepare(c, MODE_TEXTURE)) {
         prim_begin(PRIM_TRI_FAN);
-        vw_start(4, 12);
+        vw_start(4, WPV_T);
         for (i = 0; i < 4; i++)
             vtx_t(c, &q[i]);
         prim_end();
@@ -1379,7 +1412,7 @@ static void clear_buffers(Ctx *c, int color, int depth)
         begin(M_COLOR_MASK, 1);
         data(color ? 0x01010101 : 0);
         prim_begin(PRIM_TRI_FAN);
-        vw_start(4, 8);
+        vw_start(4, WPV_G);
         for (i = 0; i < 4; i++)
             vtx_g(&q[i]);
         prim_end();
@@ -1545,6 +1578,23 @@ static TQAError RenderEnd(const TQADrawContext *dc, const TQARect *modified)
         kick();
     c->frames++;
     gFrame++;
+    if (gStats) {                                   /* rave-25: boot-args nv34ravestats */
+        static unsigned long t0;
+        static NVU32 f0, tr0;
+        unsigned long t = TickCount();
+        if (!t0) {
+            t0 = t;
+            f0 = c->frames;
+            tr0 = c->tris;
+        } else if (c->frames - f0 >= 250 && t > t0) {
+            unsigned long fps10 = (unsigned long)((c->frames - f0) * 600UL / (t - t0));
+            lg("snimky %u: %lu.%lu fps, %u troj./snimku (vrchol %u slov)", c->frames, fps10 / 10, fps10 % 10,
+               (c->tris - tr0) / (c->frames - f0), WPV_T);
+            t0 = t;
+            f0 = c->frames;
+            tr0 = c->tris;
+        }
+    }
     if (done.standardNoticeMethod) {
         gpu_sync();
         done.standardNoticeMethod(dc, c->noticeRef[kQAMethod_RenderCompletion]);
@@ -2500,6 +2550,8 @@ OSErr TtRegister(void *initBlock)
     gZ16 = boot_arg("nv34z16");
     gNo2x = boot_arg("nv34no2x");
     gImmediate = boot_arg("nv34immediate");
+    gLong = boot_arg("nv34ravelong");
+    gStats = boot_arg("nv34ravestats");
     {
         ProcessSerialNumber psn;
         ProcessInfoRec info;

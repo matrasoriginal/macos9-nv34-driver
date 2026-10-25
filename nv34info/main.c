@@ -6,6 +6,10 @@
  * assigned-addresses, AAPL,address, driver,AAPL,MacOS,PowerPC (vložený ROM driver).
  *
  * Výstup ide do okna aj do súboru "NV34 Info.txt" vedľa aplikácie.
+ *
+ * cpu-1: takt procesora — uzly cpus, gpio, mac-io, i2c/teplota, vlastné meranie taktu a hodnoty
+ * GPIO registrov KeyLargo (len čítanie). PowerBook6,x prepína rýchlosť zbernicou 101/133 MHz cez
+ * voltage-gpio, frequency-gpio a slewing-done (Linux cpufreq_32.c, gpios_set_cpu_speed).
  */
 #include <stdio.h>
 #include <stdarg.h>
@@ -292,6 +296,96 @@ static void dump_assigned(const unsigned char *d, UInt32 n)
             be32(d + i) & 0xff, be32(d + i + 8), be32(d + i + 16), be32(d + i));
 }
 
+/* cpu-1: GPIO uzly (meno, reg) a logická adresa mac-io */
+#define GPIO_MAX 64
+static char gGpioName[GPIO_MAX][40];
+static UInt32 gGpioReg[GPIO_MAX];
+static int gGpioN;
+static UInt32 gMacIO, gTbFreq;
+
+static void note_entry(const RegEntryID *e, const char *path)
+{
+    const char *leaf = strrchr(path, ':');
+    UInt32 v[4], size = sizeof(v);
+    leaf = leaf ? leaf + 1 : path;
+    if (!strncmp(leaf, "mac-io", 6) && !gMacIO && RegistryPropertyGet(e, "AAPL,address", v, &size) == 0)
+        gMacIO = v[0];
+    size = sizeof(v);
+    if (strstr(path, ":cpus:") && !gTbFreq && RegistryPropertyGet(e, "timebase-frequency", v, &size) == 0)
+        gTbFreq = v[0];
+    size = sizeof(v);
+    if (strstr(path, "gpio") && strncmp(leaf, "gpio", 4) && gGpioN < GPIO_MAX &&
+        RegistryPropertyGet(e, "reg", v, &size) == 0 && size >= 4) {
+        strncpy(gGpioName[gGpioN], leaf, sizeof(gGpioName[0]) - 1);
+        gGpioReg[gGpioN++] = v[0];
+    }
+}
+
+static UInt32 tb(void)
+{
+    UInt32 v;
+    __asm__ volatile("mftb %0" : "=r"(v));
+    return v;
+}
+
+/* rozdiel slučiek s 12 a 4 závislými sčítaniami = 8 taktov na iteráciu (ako MiniGL q3-14) */
+static UInt32 loop_tb(int twelve)
+{
+    UInt32 t0, t1, x = 1;
+    long n = 1000000;
+    t0 = tb();
+    if (twelve)
+        __asm__ volatile("mtctr %1\n"
+                         "1: add %0,%0,%0\n add %0,%0,%0\n add %0,%0,%0\n add %0,%0,%0\n"
+                         " add %0,%0,%0\n add %0,%0,%0\n add %0,%0,%0\n add %0,%0,%0\n"
+                         " add %0,%0,%0\n add %0,%0,%0\n add %0,%0,%0\n add %0,%0,%0\n bdnz 1b"
+                         : "+r"(x) : "r"(n) : "ctr");
+    else
+        __asm__ volatile("mtctr %1\n"
+                         "1: add %0,%0,%0\n add %0,%0,%0\n add %0,%0,%0\n add %0,%0,%0\n bdnz 1b"
+                         : "+r"(x) : "r"(n) : "ctr");
+    t1 = tb();
+    return t1 - t0;
+}
+
+static void cpu_report(void)
+{
+    int i, k;
+    UInt32 tbf = gTbFreq ? gTbFreq : 18432000;
+    out("\n== cpu-1: takt procesora\n");
+    for (k = 0; k < 3; k++) {
+        UInt32 a = loop_tb(0), b = loop_tb(1);
+        out("  meranie %d: %lu MHz (timebase %lu Hz)\n", k + 1,
+            b > a ? (UInt32)(8.0 * tbf / (b - a)) : 0, tbf);
+    }
+    out("  mac-io AAPL,address %08lx, GPIO uzlov %d\n", gMacIO, gGpioN);
+    if (!gMacIO)
+        return;
+    /* reg je posun voči 0x50 alebo voči mac-io (Linux read_gpio) */
+    for (i = 0; i < gGpioN; i++) {
+        UInt32 off = gGpioReg[i] < 0x50 ? gGpioReg[i] + 0x50 : gGpioReg[i];
+        if (off < 0x50 || off > 0x7f) {
+            out("  %-28s reg %lx (mimo 0x50-0x7f, necitam)\n", gGpioName[i], gGpioReg[i]);
+            continue;
+        }
+        out("  %-28s reg %lx -> mac-io+%02lx = %02x\n", gGpioName[i], gGpioReg[i], off,
+            *(volatile unsigned char *)(gMacIO + off));
+    }
+    out("  GPIO 0x50-0x7f:");
+    for (i = 0x50; i < 0x80; i++)
+        out("%s%02x", (i & 15) ? " " : "\n    ", *(volatile unsigned char *)(gMacIO + i));
+    out("\n");
+}
+
+static int cpu_path(const char *path)
+{
+    const char *leaf = strrchr(path, ':');
+    leaf = leaf ? leaf + 1 : path;
+    return strstr(path, ":cpus") || strstr(path, "gpio") || !strncmp(leaf, "mac-io", 6) || strstr(path, "i2c") ||
+           strstr(path, "pmu") || strstr(path, "fan") || strstr(path, "therm") || strstr(path, "temp") ||
+           strstr(path, "power-mgt");
+}
+
 static void dump_entry(const RegEntryID *e, const char *path)
 {
     RegPropertyIter it;
@@ -353,7 +447,7 @@ int main(void)
     {
         unsigned long secs;
         GetDateTime(&secs);
-        out("\n==================== NV34 Info 9 — %lu s od 1904, %lu s od štartu\n",
+        out("\n==================== NV34 Info 10 — %lu s od 1904, %lu s od štartu\n",
             secs, TickCount() / 60);
     }
 
@@ -369,7 +463,8 @@ int main(void)
         total++;
         if (RegistryEntryToPathSize(&e, &size) == 0 && size < sizeof(path) &&
             RegistryCStrEntryToPath(&e, path, size) == 0) {
-            if (strstr(path, "NVDA") || strstr(path, "ATY") || strstr(path, "display")) {
+            note_entry(&e, path);
+            if (strstr(path, "NVDA") || strstr(path, "ATY") || strstr(path, "display") || cpu_path(path)) {
                 dump_entry(&e, path);
                 shown++;
             }
@@ -387,6 +482,7 @@ int main(void)
             (**pm).bounds.right - (**pm).bounds.left, (**pm).bounds.bottom - (**pm).bounds.top);
     }
     dump_trace(gTraceAddr);
+    cpu_report();
 
 end:
     if (gLog) {

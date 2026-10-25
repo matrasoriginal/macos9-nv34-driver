@@ -650,3 +650,6 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
   „fast“ (po vid_restart) ~5000 z ~17 000 troj./snímku s 2 textúrami; s predvoleným „high“ (nastavenie
   sa neukladá) 0. Počet trojuholníkov je v oboch prípadoch rovnaký (~17 000), fps rovnaké (~15–16):
   snímka ~65 ms, MiniGL ~21 ms (glEnd ~15, dávky ~5,5), zvyšok hra. Ďalší zisk len z prípravy vrcholov.
+- q3-18 výsledok: GPU zastane pri prvom kreslení z VRAM (hw_sync timeout), Mac zamrzne; varianty
+  nepomohli. q3-19: VTX_CACHE_INV 0x1710 len na `nv34glvbinv` (možno metóda NV40), pri zaseknutí
+  log PGRAPH trap (nsource, addr = metóda, data) a vypnutie kreslenia z VRAM; log prvého kreslenia.

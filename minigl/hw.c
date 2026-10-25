@@ -112,14 +112,25 @@ void hw_kick(void)  { if (S) nva_kickoff(S->a); }
 NVU32 gHwUploads, gHwUploadBytes, gHwSubUploads, gHwSyncs;
 NVU32 gTEnd, gTFlush, gTWait, gTSwap;
 
+static int gVbOn = -1, gVbUsed;
+
 int hw_sync(void)
 {
     NVU32 t0 = tb();
     int ok;
     gHwSyncs++;
     ok = S && !gHwDead && nva_sync(S->a, 120) == kNVAOK;
-    if (S && !ok && !gHwDead && first_time(0x70000000))
-        lg("hw_sync: GPU nedobehol do 2 s");
+    if (S && !ok && !gHwDead && first_time(0x70000000)) {
+        NV3DTrap tr;
+        nv3d_trap(S->g, &tr);                       /* q3-19: ktorá metóda GPU zastavila */
+        lg("hw_sync: GPU nedobehol do 2 s; PGRAPH intr %x nsource %x nstatus %x addr %x data %x status %x, "
+           "PFIFO intr %x get %x put %x%s", tr.intr, tr.nsource, tr.nstatus, tr.addr, tr.data, tr.status,
+           tr.fifoIntr, tr.dmaGet, tr.dmaPut, gVbUsed ? " (po kresleni z VRAM, vypinam ho)" : "");
+        if (gVbUsed)
+            gVbOn = 0;
+        if (tr.intr)
+            ok = nva_sync(S->a, 120) == kNVAOK;     /* po potvrdení chyby skúsiť dobehnúť */
+    }
     gTWait += tb() - t0;
     return ok;
 }
@@ -661,12 +672,12 @@ void hw_draw(int prim, const HwVtx *v, int n, int textured)
  * Vrchol má rovnaký formát ako kratší inline vrchol T&L (q3-17). Indexy idú do push buffra
  * (VB_ELEMENT_U16, prvý index v dolnej polovici slova ako v nouveau).
  * boot-args nv34glnovb = vypnuté, nv34glvbswap = vrchol v poradí bajtov LE, nv34glidxhi = prvý
- * index v hornej polovici slova. */
+ * index v hornej polovici slova, nv34glvbinv = VTX_CACHE_INV (0x1710) pred kreslením. */
 #define VB_SIZE     (2u << 20)
 #define VB_SEGS     16
 #define VB_SEG      (VB_SIZE / VB_SEGS)
 static NVU32 gVbOff, gVbPos, gVbStart, gVbGen, gVbSegFrame[VB_SEGS];
-static int gVbOn = -1, gVbSwap, gIdxHi, gVbCurSeg = -1;
+static int gVbSwap, gIdxHi, gVbInv, gVbCurSeg = -1;
 NVU32 gHwVbWaits;
 
 static NVU32 bswap(NVU32 v)
@@ -680,6 +691,7 @@ int hw_vb_ready(void)
         gVbOn = !gl_boot_arg("nv34glnovb");
         gVbSwap = gl_boot_arg("nv34glvbswap");
         gIdxHi = gl_boot_arg("nv34glidxhi");
+        gVbInv = gl_boot_arg("nv34glvbinv");
     }
     vtx_init();
     tnl_args();
@@ -791,8 +803,14 @@ void hw_draw_indexed(int prim, NVU32 vbOff, int textured, const NVU16 *idx, int 
         if (textured == 2)
             data(vbOff + 24);
     }
-    begin(M_VTX_CACHE_INV, 1);
-    data(0);
+    if (gVbInv) {                                   /* q3-19: v q3-18 GPU zastal — možno len NV40 */
+        begin(M_VTX_CACHE_INV, 1);
+        data(0);
+    }
+    if (!gVbUsed)
+        lg("prve kreslenie z VRAM: vrcholy na %x, textury %d, indexov %d, prve %d %d %d", vbOff, textured, n, idx[0],
+           idx[1], idx[2]);
+    gVbUsed = 1;
     begin(M_VERTEX_BEGIN_END, 1);
     data(prim);
     if (n & 1) {

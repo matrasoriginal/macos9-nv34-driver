@@ -2275,7 +2275,10 @@ static void lc_attr(int ci)
 static NVU32 gNPos, gNAttr, gNFastTri;
 
 /* q3-18: T&L s vrcholmi vo VRAM — každý použitý vrchol volania sa zapíše raz (slot podľa prvého
- * použitia), trojuholníky idú ako 16-bit indexy. 0 = nedá sa (stará cesta cez dávku). */
+ * použitia), trojuholníky idú ako 16-bit indexy (len boot-args nv34glvb, GPU ich v q3-19 odmietol;
+ * nv34glvbbatch = vrcholy v poradí trojuholníkov bez indexov).
+ * q3-20 predvolene: inline vrcholy priamo z gLV podľa indexov, bez kópie do dávky.
+ * 0 = nedá sa (stará cesta cez dávku). */
 #define IDX_MAX 32768
 static NVU16 gIdx[IDX_MAX];
 static NVU16 gVSlot[LC_MAX];
@@ -2283,14 +2286,16 @@ static NVU16 gVSlot[LC_MAX];
 static int draw_tris_vb(GLsizei count, GLenum type, const GLvoid *idx, TexObj *tx0, TexObj *tx1)
 {
     HwState st;
-    volatile NVU32 *vb;
+    volatile NVU32 *vb = 0;
     NVU32 off, t0;
-    int textured, wpv, nv = 0, maxv;
+    int textured, wpv, nv = 0, useVb, batch;
     GLsizei i;
 
     count -= count % 3;
-    if (count > IDX_MAX || !hw_vb_ready())
+    if (count > IDX_MAX)
         return 0;
+    useVb = hw_vb_ready();
+    batch = useVb && hw_vb_batch();
     if (gPBn)
         gl_flush_batch();
     t0 = tb();
@@ -2301,11 +2306,15 @@ static int draw_tris_vb(GLsizei count, GLenum type, const GLvoid *idx, TexObj *t
     textured = batch_prepare(&st);
     if (textured < 0)
         return 1;
-    wpv = textured == 2 ? 8 : textured ? 6 : 4;
-    maxv = count < gLcCount ? count : gLcCount;
-    vb = hw_vb_begin((NVU32)maxv * wpv * 4);
-    if (!vb)
+    if (!useVb && !hw_gather_ok())
         return 0;
+    wpv = textured == 2 ? 8 : textured ? 6 : 4;
+    if (useVb) {
+        int maxv = batch ? count : count < gLcCount ? count : gLcCount;
+        vb = hw_vb_begin((NVU32)maxv * wpv * 4);
+        if (!vb)
+            return 0;
+    }
     gTFlush += tb() - t0;
     for (i = 0; i < count; i++) {
         int k = (type == GL_UNSIGNED_BYTE ? ((const GLubyte *)idx)[i] :
@@ -2317,21 +2326,32 @@ static int draw_tris_vb(GLsizei count, GLenum type, const GLvoid *idx, TexObj *t
         if (gAStamp[k] != gAGen) {
             lc_attr(k);
             gNAttr++;
-            gVSlot[k] = (NVU16)nv;
-            hw_vb_put(vb + nv * wpv, &gLV[k], textured);
-            nv++;
+            if (vb && !batch) {
+                gVSlot[k] = (NVU16)nv;
+                hw_vb_put(vb + nv * wpv, &gLV[k], textured);
+                nv++;
+            }
         }
-        gIdx[i] = gVSlot[k];
+        if (batch) {
+            hw_vb_put(vb + i * wpv, &gLV[k], textured);
+            nv++;
+        } else {
+            gIdx[i] = vb ? gVSlot[k] : (NVU16)k;
+        }
     }
     t0 = tb();
-    off = hw_vb_end((NVU32)nv * wpv * 4);
-    hw_draw_indexed(5, off, textured, gIdx, count);
+    if (vb) {
+        off = hw_vb_end((NVU32)nv * wpv * 4);
+        hw_draw_indexed(5, off, textured, batch ? 0 : gIdx, count);
+        gStatVB += count / 3;
+        gStatVBv += nv;
+    } else {
+        hw_draw_gather(5, gLV, gIdx, count, textured);
+    }
     gTFlush += tb() - t0;
     gNFastTri += count / 3;
     gStatTris += count / 3;
     gStatTnl += count / 3;
-    gStatVB += count / 3;
-    gStatVBv += nv;
     if (textured == 2)
         gStatMT += count / 3;
     gStatBatches++;

@@ -653,3 +653,10 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
 - q3-18 výsledok: GPU zastane pri prvom kreslení z VRAM (hw_sync timeout), Mac zamrzne; varianty
   nepomohli. q3-19: VTX_CACHE_INV 0x1710 len na `nv34glvbinv` (možno metóda NV40), pri zaseknutí
   log PGRAPH trap (nsource, addr = metóda, data) a vypnutie kreslenia z VRAM; log prvého kreslenia.
+- q3-19 výsledok: trap pri prvom VB_ELEMENT_U16 — PGRAPH nsource 0x40002 (DATA_ERROR + bit 18),
+  nstatus 0x3000000 (INVALID_STATE, BAD_ARGUMENT), addr 0x71800, data 0x10000 (indexy 0, 1).
+  Kreslenie z vertex buffra GPU vo fixed-function režime neprijal (nouveau ho používa len s VP,
+  ENGINE 0x13). Mac aj tak zamrzol.
+- q3-20: predvolene inline vrcholy T&L priamo z gLV podľa indexov volania (bez kópie 3 HwVtx na
+  trojuholník do dávky; jedno kreslenie na glDrawElements). Vertex buffer len `nv34glvb`,
+  `nv34glvbbatch` = VB_VERTEX_BATCH (0x1814) bez indexov — či GPU vôbec číta vrcholy z VRAM.

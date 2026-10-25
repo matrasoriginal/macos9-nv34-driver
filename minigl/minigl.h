@@ -106,6 +106,9 @@ void    hw_vb_put(volatile NVU32 *d, const HwVtx *v, int textured);
 void    hw_vb_free(void);
 void    hw_draw_indexed(int prim, NVU32 vbOff, int textured, const NVU16 *idx, int n);
 extern NVU32 gHwVbWaits;
+int     hw_vb_batch(void);
+int     hw_gather_ok(void);
+void    hw_draw_gather(int prim, const HwVtx *base, const NVU16 *idx, int n, int textured);
 
 /* textúra: celý reťazec mipmáp v ARGB32 (úroveň 0 prvá), voliteľne iba úroveň 0 */
 HwTex  *hw_tex_new(void);

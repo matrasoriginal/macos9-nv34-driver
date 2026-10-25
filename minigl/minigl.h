@@ -63,6 +63,11 @@ typedef struct HwState {
     int     tnl;
     const float *mat; NVU32 matGen;
     int     cull; GLenum cullFace, frontFace;
+    /* hmla (GL_FOG): fogMode GL_LINEAR/GL_EXP/GL_EXP2, fogK = koeficienty rovnice GPU (ako nouveau
+     * nv10_get_fog_coeff), fogColor R | G<<8 | B<<16 | A<<24. Pri T&L s hmlou je mat = okno × P
+     * a mv = MODELVIEW (po riadkoch) — GPU počíta vzdialenosť v priestore oka */
+    int     fog; GLenum fogMode; float fogK[2]; NVU32 fogColor;
+    const float *mv;
 } HwState;
 
 int     hw_init(void);                                  /* 1 = GPU pripravené */
@@ -81,7 +86,8 @@ NVU32   hw_frame(void);
 /* vrcholy v súradniciach RT: x, y, z (0..1), farba 0..1, s/q, t/q, q */
 /* c = farba R<<24|G<<16|B<<8|A (wolf-3: zabalená raz, hw_draw ju zapisuje priamo) */
 /* sq1, tq1, q1 = jednotka 1 (q3-12) */
-typedef struct HwVtx { float x, y, z, r, g, b, a, sq, tq, q; NVU32 c; float sq1, tq1, q1; } HwVtx;
+/* f = 1/w (mimo T&L; hmla berie vzdialenosť w) */
+typedef struct HwVtx { float x, y, z, r, g, b, a, sq, tq, q; NVU32 c; float sq1, tq1, q1, f; } HwVtx;
 
 static inline NVU32 ubyte_f(float f)
 {
@@ -173,6 +179,8 @@ typedef struct GLS {
     GLenum  polyMode;
     int     polyOffsetFill;
     float   polyFactor, polyUnits;
+    GLenum  fogMode;
+    float   fogDensity, fogStart, fogEnd, fogColor[4];
 } GLS;
 
 typedef struct GLCtx {

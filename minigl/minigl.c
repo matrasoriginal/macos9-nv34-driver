@@ -1223,6 +1223,7 @@ static int gPBn, gPBprim;
 static TexObj *gPBtex, *gPBtex1;
 static int gPBtnl;                              /* q3-16: dávka v súradniciach objektu (HW T&L) */
 static float gTnlMat[16];                       /* zložená matica okno × MVP po riadkoch */
+static float gTnlProj[16], gTnlMV[16];          /* hmla: okno × P a MODELVIEW zvlášť (po riadkoch) */
 static NVU32 gTnlGen, gTnlXf;
 static int gTnlRtH;
 
@@ -1273,9 +1274,34 @@ static void fill_state(HwState *st, TexObj *tex)
         st->wrapS1 = gPBtex1->wrapS;
         st->wrapT1 = gPBtex1->wrapT;
     }
+    if (s->fog) {
+        float d;
+        st->fog = 1;
+        st->fogMode = s->fogMode;
+        switch (s->fogMode) {                       /* f = k0 + k1 · vzdialenosť − 1 (nouveau) */
+        case GL_LINEAR:
+            d = s->fogEnd - s->fogStart;
+            if (d > -1e-6f && d < 1e-6f)
+                d = 1e-6f;
+            st->fogK[0] = 2.0f + s->fogStart / d;
+            st->fogK[1] = -1.0f / d;
+            break;
+        case GL_EXP2:
+            st->fogK[0] = 1.5f;
+            st->fogK[1] = -0.21f * s->fogDensity;
+            break;
+        default:
+            st->fogMode = GL_EXP;
+            st->fogK[0] = 1.5f;
+            st->fogK[1] = -0.09f * s->fogDensity;
+            break;
+        }
+        st->fogColor = pack_rgba(s->fogColor[3], s->fogColor[2], s->fogColor[1], s->fogColor[0]);
+    }
     if (gPBtnl) {
         st->tnl = 1;
-        st->mat = gTnlMat;
+        st->mat = st->fog ? gTnlProj : gTnlMat;
+        st->mv = st->fog ? gTnlMV : 0;
         st->matGen = gTnlGen;
         st->cull = s->cull;
         st->cullFace = s->cullFace;
@@ -1283,7 +1309,7 @@ static void fill_state(HwState *st, TexObj *tex)
     }
 }
 
-static long gStatTris, gStatBatches, gStatMT, gStatTnl, gStatVB, gStatVBv;
+static long gStatTris, gStatBatches, gStatMT, gStatTnl, gStatVB, gStatVBv, gStatFog;
 static long gStatDE, gStatDEslow;             /* glDrawElements rýchla / pomalá cesta */
 static NVU32 gTVerts;                        /* čas pomalej cesty (glBegin/glArrayElement) */
 
@@ -1344,6 +1370,8 @@ void gl_flush_batch(void)
         gStatMT += gPBn / 3;
     if (gPBtnl)
         gStatTnl += gPBn / 3;
+    if (st.fog)
+        gStatFog += gPBn / 3;
     gStatBatches++;
     gPBn = 0;
     gTFlush += tb() - t0;
@@ -1453,6 +1481,7 @@ static void project(HwVtx *o, const V *v, int texActive)
     o->sq1 = v->s1 * iw;
     o->tq1 = v->t1 * iw;
     o->q1 = v->q1 * iw;
+    o->f = iw;
     o->c = pack_rgba(o->r, o->g, o->b, o->a);
 }
 
@@ -2095,7 +2124,7 @@ static void lc_pos_tnl(int ci)
 static void tnl_matrix(void)
 {
     GLS *s = &C->s;
-    const float *m;
+    const float *m, *pm, *mv;
     float hw, hh, tx, ty, dd, tz;
     int c;
     if (gTnlGen && gTnlXf == gXformGen && gTnlRtH == C->rt.h)
@@ -2119,6 +2148,19 @@ static void tnl_matrix(void)
         gTnlMat[4 + c] = -hh * col[1] + ty * col[3];
         gTnlMat[8 + c] = dd * col[2] + tz * col[3];
         gTnlMat[12 + c] = col[3];
+    }
+    pm = C->mstack[1][C->msp[1]];
+    mv = C->mstack[0][C->msp[0]];
+    for (c = 0; c < 4; c++) {
+        const float *col = pm + c * 4;
+        gTnlProj[c] = hw * col[0] + tx * col[3];
+        gTnlProj[4 + c] = -hh * col[1] + ty * col[3];
+        gTnlProj[8 + c] = dd * col[2] + tz * col[3];
+        gTnlProj[12 + c] = col[3];
+        gTnlMV[c] = mv[c * 4];
+        gTnlMV[4 + c] = mv[c * 4 + 1];
+        gTnlMV[8 + c] = mv[c * 4 + 2];
+        gTnlMV[12 + c] = mv[c * 4 + 3];
     }
     if (!gTnlGen)
         lg("HW T&L: prva matica %f %f %f %f / %f %f %f %f / %f %f %f %f / %f %f %f %f",
@@ -2250,6 +2292,7 @@ static void lc_attr(int ci)
     w->sq = sv * p[3];
     w->tq = tv * p[3];
     w->q = qv * p[3];
+    w->f = p[3];
     w->c = c;
     if (gPrep.tex1) {
         float s1, t1, q1 = 1.0f;
@@ -2354,6 +2397,8 @@ static int draw_tris_vb(GLsizei count, GLenum type, const GLvoid *idx, TexObj *t
     gStatTnl += count / 3;
     if (textured == 2)
         gStatMT += count / 3;
+    if (st.fog)
+        gStatFog += count / 3;
     gStatBatches++;
     return 1;
 }
@@ -2608,7 +2653,9 @@ static void enable(GLenum cap, int on)
     FLUSH();
     *p = on;
     if (cap == GL_FOG && on)
-        ONCE(0x58100000, "glEnable GL_FOG: hmla zatial nie je");
+        ONCE(0x58100000, "glEnable GL_FOG (prvykrat): rezim %x, hustota %f, %f…%f, farba %f %f %f",
+             C->s.fogMode, (double)C->s.fogDensity, (double)C->s.fogStart, (double)C->s.fogEnd,
+             (double)C->s.fogColor[0], (double)C->s.fogColor[1], (double)C->s.fogColor[2]);
 }
 
 void glEnable(GLenum cap) { enable(cap, 1); }
@@ -2837,10 +2884,65 @@ void glPixelStorei(GLenum pname, GLint v)
 
 void glPixelStoref(GLenum pname, GLfloat v) { glPixelStorei(pname, (GLint)v); }
 
-void glFogf(GLenum p, GLfloat v) { (void)p; (void)v; }
-void glFogi(GLenum p, GLint v) { (void)p; (void)v; }
-void glFogfv(GLenum p, const GLfloat *v) { (void)p; (void)v; }
-void glFogiv(GLenum p, const GLint *v) { (void)p; (void)v; }
+/* hmla: len stav; GPU ju robí cez final combiner (hw_state) */
+static void fog_param(GLenum p, const GLfloat *v)
+{
+    GLS *s;
+    CHECK();
+    s = &C->s;
+    ONCE(0x58110000 | (p & 0xffff), "glFog %x = %f (prvykrat)", p, (double)v[0]);
+    switch (p) {
+    case GL_FOG_MODE:
+        if (s->fogMode != (GLenum)v[0]) {
+            FLUSH();
+            s->fogMode = (GLenum)v[0];
+        }
+        break;
+    case GL_FOG_DENSITY:
+        if (s->fogDensity != v[0]) {
+            FLUSH();
+            s->fogDensity = v[0];
+        }
+        break;
+    case GL_FOG_START:
+        if (s->fogStart != v[0]) {
+            FLUSH();
+            s->fogStart = v[0];
+        }
+        break;
+    case GL_FOG_END:
+        if (s->fogEnd != v[0]) {
+            FLUSH();
+            s->fogEnd = v[0];
+        }
+        break;
+    case GL_FOG_COLOR:
+        if (s->fogColor[0] != v[0] || s->fogColor[1] != v[1] || s->fogColor[2] != v[2] ||
+            s->fogColor[3] != v[3]) {
+            FLUSH();
+            memcpy(s->fogColor, v, sizeof(s->fogColor));
+        }
+        break;
+    }
+}
+
+void glFogf(GLenum p, GLfloat v) { fog_param(p, &v); }
+void glFogi(GLenum p, GLint v) { GLfloat f = (GLfloat)v; fog_param(p, &f); }
+void glFogfv(GLenum p, const GLfloat *v) { if (v) fog_param(p, v); }
+void glFogiv(GLenum p, const GLint *v)
+{
+    GLfloat f[4];
+    int i;
+    if (!v)
+        return;
+    if (p == GL_FOG_COLOR) {                        /* celé čísla → −1…1 */
+        for (i = 0; i < 4; i++)
+            f[i] = (GLfloat)((double)v[i] / 2147483647.0);
+    } else {
+        f[0] = (GLfloat)v[0];
+    }
+    fog_param(p, f);
+}
 
 void glPushAttrib(GLbitfield mask)
 {
@@ -3115,6 +3217,9 @@ void gl_ctx_init(GLCtx *c)
     s->clearDepth = 1;
     s->dither = 1;
     s->polyMode = GL_FILL;
+    s->fogMode = GL_EXP;
+    s->fogDensity = 1;
+    s->fogEnd = 1;
 }
 
 void gl_release_textures(void)
@@ -3231,7 +3336,7 @@ void gl_frame_stats(void)
             cpu_props();
         }
         lg("snimky %d: %u.%u fps, ms/snimku: celkom %u.%02u, glEnd %u.%02u (z toho davky %u.%02u, cakanie GPU %u.%02u), swap %u.%02u; "
-           "MiniGL spolu %u.%02u ms (glFinish %d× %u.%02u ms); rychla cesta: %d troj., poz. %d, atrib. %d; 2 textury %d troj., T&L %d troj., VRAM %d troj. / %d vrch. (cakanie %u); DrawElements %d/%d pomalych (%u.%02u ms); orezanych %d troj. (%u.%02u ms, pas %u.%02u); "
+           "MiniGL spolu %u.%02u ms (glFinish %d× %u.%02u ms); rychla cesta: %d troj., poz. %d, atrib. %d; 2 textury %d troj., T&L %d troj., hmla %d troj., VRAM %d troj. / %d vrch. (cakanie %u); DrawElements %d/%d pomalych (%u.%02u ms); orezanych %d troj. (%u.%02u ms, pas %u.%02u); "
            "%d troj./snimku, %d davok; nahrati %u (+%u ciastocnych, %u KB), sync %u; tb %u/ms",
            C->frames, fps10 / 10, fps10 % 10,
            ms100(dt, perMs, gIvFrames) / 100, ms100(dt, perMs, gIvFrames) % 100,
@@ -3242,7 +3347,8 @@ void gl_frame_stats(void)
            ms100(gTGL + gTSwap, perMs, gIvFrames) / 100, ms100(gTGL + gTSwap, perMs, gIvFrames) % 100,
            (long)(gFinishN / gIvFrames), ms100(gTFinish, perMs, gIvFrames) / 100, ms100(gTFinish, perMs, gIvFrames) % 100,
            (long)(gNFastTri / gIvFrames), (long)(gNPos / gIvFrames), (long)(gNAttr / gIvFrames),
-           (long)(gStatMT / gIvFrames), (long)(gStatTnl / gIvFrames), (long)(gStatVB / gIvFrames),
+           (long)(gStatMT / gIvFrames), (long)(gStatTnl / gIvFrames), (long)(gStatFog / gIvFrames),
+           (long)(gStatVB / gIvFrames),
            (long)(gStatVBv / gIvFrames), gHwVbWaits,
            gStatDE / gIvFrames, gStatDEslow / gIvFrames,
            ms100(gTVerts, perMs, gIvFrames) / 100, ms100(gTVerts, perMs, gIvFrames) % 100,
@@ -3263,7 +3369,7 @@ void gl_frame_stats(void)
         gTGL = 0;
         gTFinish = gFinishN = 0;
         gNPos = gNAttr = gNFastTri = 0;
-        gStatMT = gStatTnl = gStatVB = gStatVBv = 0;
+        gStatMT = gStatTnl = gStatFog = gStatVB = gStatVBv = 0;
         gHwVbWaits = 0;
     }
 }

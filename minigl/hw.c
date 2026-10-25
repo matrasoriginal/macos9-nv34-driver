@@ -11,6 +11,8 @@
 #define M_DMA_VTXBUF0       0x019c
 #define M_RT_HORIZ          0x0200
 #define M_TEX_UNITS_ENABLE  0x023c
+#define M_FOG_ENABLE        0x036c
+#define M_FOG_COORD_DIST    0x08c8
 #define M_TEX_MATRIX_ENABLE 0x0240
 #define M_VIEWPORT_CLIP_H   0x02c0
 #define M_MODELVIEW0        0x0480
@@ -79,15 +81,20 @@ static HwTex *gTexList;
 static long hwMode = -1, hwBlend = -1, hwAlpha = -1, hwDepth = -1, hwMask = -1, hwScis = -1, hwFmt = -1;
 static long hwTex = -1, hwTexKey = -1, hwTexEpoch = -1;
 static long hwTex1 = -1, hwTex1Key = -1, hwTex1Epoch = -1;
-static long hwTnl = -1, hwMatGen = -1, hwCull = -1;
+static long hwTnl = -1, hwMatGen = -1, hwCull = -1, hwMv = -1;
+static long hwFin = -1, hwFogOn = -1;
+static NVU32 hwFogK[6];
 static int gVtx12 = -1, gColorBE, gCompact;        /* formát vrcholu (opt-5, q3-17) */
+/* hmla mimo T&L: vo vrchole súradnica hmly (atribút 5 = vzdialenosť w) za farbou */
+static int gFogV, gNoFog, gFogRadial;
 
 static void invalidate(void)
 {
     hwMode = hwBlend = hwAlpha = hwDepth = hwMask = hwScis = hwFmt = -1;
     hwTex = hwTexKey = hwTexEpoch = -1;
     hwTex1 = hwTex1Key = hwTex1Epoch = -1;
-    hwTnl = hwMatGen = hwCull = -1;
+    hwTnl = hwMatGen = hwCull = hwMv = -1;
+    hwFin = hwFogOn = -1;
 }
 
 /* hl-2: ak GPU neodpovedá (timeout pri čakaní na miesto v push buffri), ďalej nič nepísať —
@@ -288,12 +295,14 @@ static void vtx_init(void)
     if (gVtx12 < 0) {
         gVtx12 = gl_boot_arg("nv34glvtx12");
         gColorBE = !gl_boot_arg("nv34glcolorle");   /* opt-7: GPU číta R v najvyššom bajte */
+        gNoFog = gl_boot_arg("nv34glnofog");
+        gFogRadial = gl_boot_arg("nv34glfogradial");
     }
 }
 
 static void set_vtxfmt(int tex)
 {
-    int i, key = tex | (gCompact << 4);
+    int i, key = tex | (gCompact << 4) | (gFogV << 5);
     if (hwFmt == key)
         return;
     begin(M_VTXFMT, 16);
@@ -309,10 +318,11 @@ static void set_vtxfmt(int tex)
                  (i == 8 && tex) ? (0x2 | (2u << 4) | st) :
                  (i == 9 && tex == 2) ? (0x2 | (2u << 4) | st) : 0x2);
     } else {
-        NVU32 st = (tex == 2 ? 48u : tex ? 32u : 16u) << 8;   /* q3-12: 2 textúry = 12 slov */
+        NVU32 st = ((tex == 2 ? 48u : tex ? 32u : 16u) + (gFogV ? 4u : 0u)) << 8;   /* q3-12: 2 textúry = 12 slov */
         for (i = 0; i < 16; i++)
             data(i == 0 ? (0x2 | (3u << 4) | st) :           /* V32_FLOAT × 3 */
                  i == 3 ? (0x4 | (4u << 4) | st) :           /* U8_UNORM × 4 */
+                 (i == 5 && gFogV) ? (0x2 | (1u << 4) | st) :  /* hmla: V32_FLOAT × 1 */
                  (i == 8 && tex) ? (0x2 | (4u << 4) | st) :
                  (i == 9 && tex == 2) ? (0x2 | (4u << 4) | st) : 0x2);
     }
@@ -424,8 +434,10 @@ static void tnl_state(const HwState *st)
     long key;
     tnl_args();
     if (hwTnl != st->tnl) {
-        if (hwTnl < 0)
+        if (hwTnl < 0 || (!st->tnl && hwMv > 0)) {
             mat_upload(M_MODELVIEW0, 0);
+            hwMv = 0;
+        }
         begin(M_DEPTH_CONTROL, 1);                  /* 0x01 = orezať hĺbkou (GL), 0x10 = obmedziť */
         data(st->tnl && !gTnlClamp ? 0x01 : 0x10);
         if (!st->tnl) {
@@ -435,9 +447,14 @@ static void tnl_state(const HwState *st)
         hwTnl = st->tnl;
         gCompact = st->tnl && !gTnl4 && !gVtx12;
     }
-    if (st->tnl && hwMatGen != (long)st->matGen) {
+    /* hmla: MODELVIEW zvlášť (GPU berie vzdialenosť v priestore oka), inak identita a v PROJECTION
+     * celá matica */
+    if (st->tnl && (hwMatGen != (long)st->matGen || hwMv != (st->mv != 0))) {
         mat_upload(M_PROJECTION0, st->mat);
+        if (st->mv || hwMv)
+            mat_upload(M_MODELVIEW0, st->mv);
         hwMatGen = st->matGen;
+        hwMv = st->mv != 0;
     }
     /* odvrátené steny: bez T&L ich odstráni CPU. GPU berie FRONT_FACE podľa GL (q3-16: s otočením
      * kvôli y dole zmizlo všetko) */
@@ -458,7 +475,7 @@ static void tnl_state(const HwState *st)
 int hw_state(HwTarget *t, const HwState *st)
 {
     long key;
-    int mode = st->tex && tex_resident(st->tex);
+    int mode = st->tex && tex_resident(st->tex), fog;
 
     /* q3-12: druhá jednotka (nie s pôvodným 12-slovným formátom nv34glvtx12) */
     vtx_init();
@@ -484,10 +501,6 @@ int hw_state(HwTarget *t, const HwState *st)
         if (!mode) {
             begin(M_TEX_UNITS_ENABLE, 1);
             data(0);
-            begin(M_RC_FINAL0, 3);
-            data(0x00000004);                       /* farba = primárna */
-            data(0x00001400);
-            data(0x01000101);
         } else {
             begin(M_TEX_UNITS_ENABLE, 1);
             data(mode == 2 ? 3 : 1);                /* interpolované súradnice tex0 (a tex1) */
@@ -498,12 +511,65 @@ int hw_state(HwTarget *t, const HwState *st)
             data(0);
             data(0x00000c00);
             data(0x00000c00);
-            begin(M_RC_FINAL0, 3);
-            data(0x0000000c);
-            data(0x00001c00);
-            data(0x01000101);
         }
         hwMode = mode;
+    }
+    /* final combiner: farba = D (primárna / spare0); s hmlou A·B + (1−A)·C, A = FOG.a (faktor hmly),
+     * B = farba, C = FOG.rgb (farba hmly) ako v nouveau nv10_state_frag.c */
+    fog = st->fog && !gNoFog && !gVtx12;
+    key = (mode != 0) | (fog << 1);
+    if (hwFin != key) {
+        NVU32 col = mode ? 0x0c : 0x04;
+        begin(M_RC_FINAL0, 3);
+        data(fog ? (0x13u << 24) | (col << 16) | (0x03u << 8) : col);
+        data(mode ? 0x00001c00 : 0x00001400);
+        data(0x01000101);
+        hwFin = key;
+    }
+    gFogV = fog && !st->tnl;
+    if (fog) {
+        /* zdroj: pri T&L vzdialenosť od roviny oka |z| (ORTHOGONAL_ABS, režimy UNSIGNED — predvolené
+         * v Mesa), boot-args nv34glfogradial = radiálna; mimo T&L súradnica z vrcholu (FOG, SIGNED) */
+        int uns = st->tnl && !gFogRadial;
+        NVU32 k[6];
+        int i;
+        union { float f; NVU32 u; } a, b;
+        a.f = st->fogK[0];
+        b.f = st->fogK[1];
+        k[0] = st->tnl ? (gFogRadial ? 1 : 3) : 6;
+        k[1] = st->fogMode == GL_LINEAR ? (uns ? 0x0804 : 0x2601) :
+               st->fogMode == GL_EXP2 ? (uns ? 0x0803 : 0x0801) : (uns ? 0x0802 : 0x0800);
+        k[2] = a.u;
+        k[3] = b.u;
+        k[4] = 0;
+        k[5] = st->fogColor;
+        for (i = 0; i < 6 && k[i] == hwFogK[i]; i++)
+            ;
+        if (hwFogOn != 1 || i < 6) {
+            static int logged;
+            if (!logged) {
+                logged = 1;
+                lg("hmla: zdroj %u, rezim %x, k %f %f, farba %x (T&L %d)", k[0], k[1], (double)a.f, (double)b.f,
+                   k[5], st->tnl);
+            }
+            begin(M_FOG_COORD_DIST, 5);
+            data(k[0]);
+            data(k[1]);
+            data(k[2]);
+            data(k[3]);
+            data(k[4]);
+            if (hwFogOn != 1 || k[5] != hwFogK[5]) {
+                begin(M_FOG_ENABLE, 2);
+                data(1);
+                data(k[5]);
+            }
+            memcpy(hwFogK, k, sizeof(k));
+            hwFogOn = 1;
+        }
+    } else if (hwFogOn != 0) {
+        begin(M_FOG_ENABLE, 1);
+        data(0);
+        hwFogOn = 0;
     }
     /* blending */
     key = st->blend ? (long)((st->blendSrc << 16) | st->blendDst) : 0;
@@ -597,7 +663,7 @@ void hw_draw(int prim, const HwVtx *v, int n, int textured)
         return;
     vtx_init();
     wpv = gVtx12 ? (textured ? 12 : 8) : gCompact ? (textured == 2 ? 8 : textured ? 6 : 4) :
-          (textured == 2 ? 12 : textured ? 8 : 4);
+          (textured == 2 ? 12 : textured ? 8 : 4) + gFogV;
     set_vtxfmt(textured);
     begin(M_VERTEX_BEGIN_END, 1);
     data(prim);
@@ -638,6 +704,23 @@ void hw_draw(int prim, const HwVtx *v, int n, int textured)
                     p += 8;
                 } else {
                     p += 6;
+                }
+            }
+        } else if (gFogV) {                           /* hmla: za farbou vzdialenosť w = 1/f */
+            for (i = 0; i < cnt; i++, v++) {
+                p[0] = v->x; p[1] = v->y; p[2] = v->z;
+                ((volatile NVU32 *)p)[3] = vcolor(v);
+                p[4] = v->f > 0 ? 1.0f / v->f : 0.0f;
+                if (textured) {
+                    p[5] = v->sq; p[6] = v->tq; p[7] = 0.0f; p[8] = v->q;
+                    if (textured == 2) {
+                        p[9] = v->sq1; p[10] = v->tq1; p[11] = 0.0f; p[12] = v->q1;
+                        p += 13;
+                    } else {
+                        p += 9;
+                    }
+                } else {
+                    p += 5;
                 }
             }
         } else if (textured == 2) {

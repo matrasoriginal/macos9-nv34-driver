@@ -631,3 +631,9 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
   Mac OS 9 o zníženom takte nevie, cez Power Manager sa preto nedá zmeniť. Skutočné prepnutie robí PMU
   príkaz 0x7d s resetom CPU (ako uspanie, Linux pmu_set_speed), z knižnice hry to nie je bezpečné.
   Ďalej: HW T&L, aby CPU robil menej.
+- q3-16: **HW T&L** v rýchlom glDrawElements (boot-args `nv34gltnl`): vrcholy v súradniciach
+  objektu, do PROJECTION (0x0680) zložená matica okno × MVP po riadkoch (ako nouveau NV10/NV20),
+  MODELVIEW jednotková, viewport posun 0 / mierka 1 bez zmeny. Orezanie robí GPU (DEPTH_CONTROL
+  0x01), odvrátené steny GPU (CULL_FACE 0x1830, FRONT_FACE 0x1834, predná strana otočená kvôli
+  y dole). S polygon offsetom ostáva cesta na CPU. Varianty: `nv34gltnlt` (transponovaná matica),
+  `nv34gltnlclamp` (DEPTH_CONTROL 0x10), `nv34gltnlccw` (FRONT_FACE bez otočenia).

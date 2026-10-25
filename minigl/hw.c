@@ -12,6 +12,8 @@
 #define M_TEX_UNITS_ENABLE  0x023c
 #define M_TEX_MATRIX_ENABLE 0x0240
 #define M_VIEWPORT_CLIP_H   0x02c0
+#define M_MODELVIEW0        0x0480
+#define M_PROJECTION0       0x0680
 #define M_DITHER_ENABLE     0x0300
 #define M_ALPHA_FUNC_ENABLE 0x0304
 #define M_BLEND_FUNC_ENABLE 0x0310
@@ -28,6 +30,7 @@
 #define M_VTXFMT            0x1740
 #define M_VERTEX_BEGIN_END  0x1808
 #define M_VERTEX_DATA       0x1818
+#define M_CULL_FACE         0x1830
 #define M_CULL_FACE_ENABLE  0x183c
 #define M_TEX_OFFSET0       0x1a00
 #define M_DEPTH_CONTROL     0x1d78
@@ -70,12 +73,14 @@ static HwTex *gTexList;
 static long hwMode = -1, hwBlend = -1, hwAlpha = -1, hwDepth = -1, hwMask = -1, hwScis = -1, hwFmt = -1;
 static long hwTex = -1, hwTexKey = -1, hwTexEpoch = -1;
 static long hwTex1 = -1, hwTex1Key = -1, hwTex1Epoch = -1;
+static long hwTnl = -1, hwMatGen = -1, hwCull = -1;
 
 static void invalidate(void)
 {
     hwMode = hwBlend = hwAlpha = hwDepth = hwMask = hwScis = hwFmt = -1;
     hwTex = hwTexKey = hwTexEpoch = -1;
     hwTex1 = hwTex1Key = hwTex1Epoch = -1;
+    hwTnl = hwMatGen = hwCull = -1;
 }
 
 /* hl-2: ak GPU neodpovedá (timeout pri čakaní na miesto v push buffri), ďalej nič nepísať —
@@ -362,6 +367,58 @@ static void tex_unit(int u, HwTex *x, GLenum minF, GLenum magF, GLenum ws, GLenu
     x->lastUse = gFrame;
 }
 
+/* q3-16: transformácia. Fixed-function NV34 násobí vrchol maticou PROJECTION (ako NV10/NV20
+ * v nouveau: zložená matica), MODELVIEW ostáva jednotková; viewport (posun 0, mierka 1) je
+ * v matici. Bez T&L jednotková matica (vrcholy v súradniciach okna, w = 1).
+ * boot-args nv34gltnlt = matica transponovaná, nv34gltnlclamp = hĺbku obmedziť (bez orezania
+ * blízkou/ďalekou rovinou), nv34gltnlccw = smer prednej steny bez otočenia. */
+static int gTnlT = -1, gTnlClamp, gTnlCcw;
+
+static void mat_upload(NVU32 mthd, const float *m)
+{
+    int i;
+    begin(mthd, 16);
+    for (i = 0; i < 16; i++)
+        dataf(m ? (gTnlT ? m[(i & 3) * 4 + (i >> 2)] : m[i]) : ((i % 5) == 0 ? 1.0f : 0.0f));
+}
+
+static void tnl_state(const HwState *st)
+{
+    long key;
+    if (gTnlT < 0) {
+        gTnlT = gl_boot_arg("nv34gltnlt");
+        gTnlClamp = gl_boot_arg("nv34gltnlclamp");
+        gTnlCcw = gl_boot_arg("nv34gltnlccw");
+    }
+    if (hwTnl != st->tnl) {
+        if (hwTnl < 0)
+            mat_upload(M_MODELVIEW0, 0);
+        begin(M_DEPTH_CONTROL, 1);                  /* 0x01 = orezať hĺbkou (GL), 0x10 = obmedziť */
+        data(st->tnl && !gTnlClamp ? 0x01 : 0x10);
+        if (!st->tnl) {
+            mat_upload(M_PROJECTION0, 0);
+            hwMatGen = -1;
+        }
+        hwTnl = st->tnl;
+    }
+    if (st->tnl && hwMatGen != (long)st->matGen) {
+        mat_upload(M_PROJECTION0, st->mat);
+        hwMatGen = st->matGen;
+    }
+    /* odvrátené steny: bez T&L ich odstráni CPU. Okno má y dole → predná strana otočená */
+    key = st->tnl && st->cull ? (long)((st->cullFace << 16) | st->frontFace) : 0;
+    if (hwCull != key) {
+        if (key) {
+            begin(M_CULL_FACE, 2);
+            data(st->cullFace);
+            data(gTnlCcw ? st->frontFace : st->frontFace == GL_CCW ? GL_CW : GL_CCW);
+        }
+        begin(M_CULL_FACE_ENABLE, 1);
+        data(key != 0);
+        hwCull = key;
+    }
+}
+
 /* vráti 0 bez textúry, 1 s textúrou, 2 s dvoma (textúry sú vo VRAM) */
 int hw_state(HwTarget *t, const HwState *st)
 {
@@ -456,6 +513,7 @@ int hw_state(HwTarget *t, const HwState *st)
         data(st->colorMask);
         hwMask = st->colorMask;
     }
+    tnl_state(st);
     set_scissor(t, st);
     return mode;
 }

@@ -95,6 +95,7 @@ static float gGuard = 1.01f;                /* ochranný pás orezávania (wolf-
 static int gTexDbg, gTexDbgN;               /* q3-1: boot-args nv34gltex */
 static int gStatsOn;                /* boot-args nv34glstats: časy každých 250 snímok do logu */
 static int gMT = 1;                 /* q3-12: GL_ARB_multitexture (boot-args nv34glnomt = vypnuté) */
+static int gTnl;                    /* q3-16: HW T&L v glDrawElements (boot-args nv34gltnl) */
 
 static int boot_arg(const char *word)
 {
@@ -132,6 +133,7 @@ void gl_stats_init(void)
     if (boot_arg("nv34glguard4"))
         gGuard = 4.0f;
     gMT = !boot_arg("nv34glnomt");
+    gTnl = boot_arg("nv34gltnl");
 }
 
 NV34Shared *shared(void)
@@ -212,7 +214,7 @@ static void fmt_num(char **o, NVU32 v, int base, int width, int neg)
 /* %s %d %u %x %c, šírka, %f = 3 desatinné miesta */
 void lg(const char *fmt, ...)
 {
-    char buf[640], *o = buf, *end = buf + sizeof(buf) - 24;
+    char buf[800], *o = buf, *end = buf + sizeof(buf) - 24;
     va_list ap;
 
     va_start(ap, fmt);
@@ -1218,6 +1220,10 @@ static int tex_prepare(TexObj *t)
 static HwVtx gPB[PB_MAX];
 static int gPBn, gPBprim;
 static TexObj *gPBtex, *gPBtex1;
+static int gPBtnl;                              /* q3-16: dávka v súradniciach objektu (HW T&L) */
+static float gTnlMat[16];                       /* zložená matica okno × MVP po riadkoch */
+static NVU32 gTnlGen, gTnlXf;
+static int gTnlRtH;
 
 static void fill_state(HwState *st, TexObj *tex)
 {
@@ -1266,9 +1272,17 @@ static void fill_state(HwState *st, TexObj *tex)
         st->wrapS1 = gPBtex1->wrapS;
         st->wrapT1 = gPBtex1->wrapT;
     }
+    if (gPBtnl) {
+        st->tnl = 1;
+        st->mat = gTnlMat;
+        st->matGen = gTnlGen;
+        st->cull = s->cull;
+        st->cullFace = s->cullFace;
+        st->frontFace = s->frontFace;
+    }
 }
 
-static long gStatTris, gStatBatches, gStatMT;
+static long gStatTris, gStatBatches, gStatMT, gStatTnl;
 static long gStatDE, gStatDEslow;             /* glDrawElements rýchla / pomalá cesta */
 static NVU32 gTVerts;                        /* čas pomalej cesty (glBegin/glArrayElement) */
 
@@ -1323,6 +1337,8 @@ void gl_flush_batch(void)
     gStatTris += gPBn / 3;
     if (textured == 2)
         gStatMT += gPBn / 3;
+    if (gPBtnl)
+        gStatTnl += gPBn / 3;
     gStatBatches++;
     gPBn = 0;
     gTFlush += tb() - t0;
@@ -1438,8 +1454,9 @@ static void project(HwVtx *o, const V *v, int texActive)
 static void batch_begin(int prim, int need)
 {
     TexObj *tex = active_tex(), *tex1 = active_tex1();
-    if (gPBn && (gPBprim != prim || gPBtex != tex || gPBtex1 != tex1 || gPBn + need > PB_MAX))
+    if (gPBn && (gPBprim != prim || gPBtex != tex || gPBtex1 != tex1 || gPBtnl || gPBn + need > PB_MAX))
         gl_flush_batch();
+    gPBtnl = 0;
     gPBprim = prim;
     gPBtex = tex;
     gPBtex1 = tex1;
@@ -2007,7 +2024,7 @@ static HwVtx gLV[LC_MAX];                       /* wolf-3: pripravený vrchol (o
 static int gLockOn, gLockFirst, gLockCount;
 static int gLcBase = -1, gLcCount, gLcLocked;   /* obsah cache */
 static NVU32 gLcGen;
-static int gLcRtH;
+static int gLcRtH, gLcTnl;
 static const void *gLcPtr;
 
 static int pos_fetch(GLint i, float *o)
@@ -2054,6 +2071,57 @@ static void lc_build(int base, int n, int locked)
     gLcGen = gXformGen;
     gLcRtH = C->rt.h;
     gLcPtr = C->va.ptr;
+}
+
+/* q3-16: pri HW T&L ostáva vrchol v súradniciach objektu (gLW = x, y, z, 1) */
+static void lc_pos_tnl(int ci)
+{
+    float v[4], *w = gLW[ci];
+    pos_fetch(gLcBase + ci, v);
+    w[0] = v[0]; w[1] = v[1]; w[2] = v[2]; w[3] = 1.0f;
+    gLO[ci] = 0;
+    gPStamp[ci] = gPGen;
+}
+
+/* zložená matica pre GPU: riadky okna (y dole, hĺbka depthNear…depthFar) × MVP */
+static void tnl_matrix(void)
+{
+    GLS *s = &C->s;
+    const float *m;
+    float hw, hh, tx, ty, dd, tz;
+    int c;
+    if (gTnlGen && gTnlXf == gXformGen && gTnlRtH == C->rt.h)
+        return;
+    if (gPBn && gPBtnl)                             /* dávka ešte so starou maticou */
+        gl_flush_batch();
+    if (C->mvpDirty) {
+        mat_mul(C->mvp, C->mstack[1][C->msp[1]], C->mstack[0][C->msp[0]]);
+        C->mvpDirty = 0;
+    }
+    m = C->mvp;
+    hw = s->viewport[2] * 0.5f;
+    hh = s->viewport[3] * 0.5f;
+    tx = s->viewport[0] + hw;
+    ty = (float)C->rt.h - s->viewport[1] - hh;
+    dd = (float)((s->depthFar - s->depthNear) * 0.5);
+    tz = (float)s->depthNear + dd;
+    for (c = 0; c < 4; c++) {
+        const float *col = m + c * 4;
+        gTnlMat[c] = hw * col[0] + tx * col[3];
+        gTnlMat[4 + c] = -hh * col[1] + ty * col[3];
+        gTnlMat[8 + c] = dd * col[2] + tz * col[3];
+        gTnlMat[12 + c] = col[3];
+    }
+    if (!gTnlGen)
+        lg("HW T&L: prva matica %f %f %f %f / %f %f %f %f / %f %f %f %f / %f %f %f %f",
+           (double)gTnlMat[0], (double)gTnlMat[1], (double)gTnlMat[2], (double)gTnlMat[3], (double)gTnlMat[4],
+           (double)gTnlMat[5], (double)gTnlMat[6], (double)gTnlMat[7], (double)gTnlMat[8], (double)gTnlMat[9],
+           (double)gTnlMat[10], (double)gTnlMat[11], (double)gTnlMat[12], (double)gTnlMat[13], (double)gTnlMat[14],
+           (double)gTnlMat[15]);
+    gTnlXf = gXformGen;
+    gTnlRtH = C->rt.h;
+    if (++gTnlGen == 0)
+        gTnlGen = 1;
 }
 
 static void lc_pos(int ci)
@@ -2203,7 +2271,7 @@ static int draw_tris_fast(GLsizei count, GLenum type, const GLvoid *idx)
     GLS *s = &C->s;
     GLint mn = 0x7fffffff, mx = -1, k;
     GLsizei i;
-    int texActive, rep, repA, offs;
+    int texActive, rep, repA, offs, tnl;
     TexObj *tx0, *tx1;
 
     for (i = 0; i < count; i++) {
@@ -2214,21 +2282,26 @@ static int draw_tris_fast(GLsizei count, GLenum type, const GLvoid *idx)
     }
     if (mx < 0)
         return 1;
+    /* q3-16: HW T&L (bez polygon offsetu — ten počíta CPU v súradniciach okna) */
+    offs = s->polyOffsetFill && (s->polyFactor != 0 || s->polyUnits != 0);
+    tnl = gTnl && !offs && C->va.size <= 3;
     if (gLockOn && mn >= gLockFirst && mx < gLockFirst + gLockCount && gLockCount <= LC_MAX) {
         if (!gLcLocked || gLcBase != gLockFirst || gLcCount != gLockCount || gLcGen != gXformGen || gLcRtH != C->rt.h ||
-            gLcPtr != C->va.ptr)
+            gLcPtr != C->va.ptr || gLcTnl != tnl)
             lc_build(gLockFirst, gLockCount, 1);
     } else if (mx - mn + 1 <= LC_MAX) {
         lc_build(mn, mx - mn + 1, 0);
     } else {
         return 0;
     }
+    gLcTnl = tnl;
+    if (tnl)
+        tnl_matrix();
     tx0 = active_tex();
     tx1 = active_tex1();
     texActive = tx0 != 0;
     rep = texActive && (s->texEnv == GL_REPLACE || s->texEnv == GL_DECAL);
     repA = s->texEnv == GL_REPLACE && C->bound->hasAlpha;
-    offs = s->polyOffsetFill && (s->polyFactor != 0 || s->polyUnits != 0);
     /* wolf-3/4: vrchol (okno, s/q, zabalená farba) pripravený raz za volanie, až pri prvom použití */
     {
         int fastc = C->ca.on && C->ca.ptr && C->ca.type == GL_UNSIGNED_BYTE && C->ca.size == 4;
@@ -2248,6 +2321,37 @@ static int draw_tris_fast(GLsizei count, GLenum type, const GLvoid *idx)
             memset(gAStamp, 0, sizeof(gAStamp));
             gAGen = 1;
         }
+    }
+    if (tnl) {                                      /* orezanie a odvrátené steny robí GPU */
+        for (i = 0; i + 2 < count; i += 3) {
+            int j, c[3];
+            for (j = 0; j < 3; j++) {
+                GLsizei q = i + j;
+                c[j] = (type == GL_UNSIGNED_BYTE ? ((const GLubyte *)idx)[q] :
+                        type == GL_UNSIGNED_SHORT ? ((const GLushort *)idx)[q] : (GLint)((const GLuint *)idx)[q]) -
+                       gLcBase;
+                if (gPStamp[c[j]] != gPGen) {
+                    lc_pos_tnl(c[j]);
+                    gNPos++;
+                }
+                if (gAStamp[c[j]] != gAGen) {
+                    lc_attr(c[j]);
+                    gNAttr++;
+                }
+            }
+            gNFastTri++;
+            if (gPBn && (gPBprim != 5 || gPBtex != tx0 || gPBtex1 != tx1 || !gPBtnl || gPBn + 3 > PB_MAX))
+                gl_flush_batch();
+            gPBtnl = 1;
+            gPBprim = 5;
+            gPBtex = tx0;
+            gPBtex1 = tx1;
+            gPB[gPBn] = gLV[c[0]];
+            gPB[gPBn + 1] = gLV[c[1]];
+            gPB[gPBn + 2] = gLV[c[2]];
+            gPBn += 3;
+        }
+        return 1;
     }
     for (i = 0; i + 2 < count; i += 3) {
         GLint id[3];
@@ -2296,8 +2400,9 @@ static int draw_tris_fast(GLsizei count, GLenum type, const GLvoid *idx)
                     (s->cullFace == GL_FRONT && front))
                     continue;
             }
-            if (gPBn && (gPBprim != 5 || gPBtex != tx0 || gPBtex1 != tx1 || gPBn + 3 > PB_MAX))
+            if (gPBn && (gPBprim != 5 || gPBtex != tx0 || gPBtex1 != tx1 || gPBtnl || gPBn + 3 > PB_MAX))
                 gl_flush_batch();
+            gPBtnl = 0;
             gPBprim = 5;
             gPBtex = tx0;
             gPBtex1 = tx1;
@@ -3010,7 +3115,7 @@ void gl_frame_stats(void)
             cpu_props();
         }
         lg("snimky %d: %u.%u fps, ms/snimku: celkom %u.%02u, glEnd %u.%02u (z toho davky %u.%02u, cakanie GPU %u.%02u), swap %u.%02u; "
-           "MiniGL spolu %u.%02u ms (glFinish %d× %u.%02u ms); rychla cesta: %d troj., poz. %d, atrib. %d; 2 textury %d troj.; DrawElements %d/%d pomalych (%u.%02u ms); orezanych %d troj. (%u.%02u ms, pas %u.%02u); "
+           "MiniGL spolu %u.%02u ms (glFinish %d× %u.%02u ms); rychla cesta: %d troj., poz. %d, atrib. %d; 2 textury %d troj., T&L %d troj.; DrawElements %d/%d pomalych (%u.%02u ms); orezanych %d troj. (%u.%02u ms, pas %u.%02u); "
            "%d troj./snimku, %d davok; nahrati %u (+%u ciastocnych, %u KB), sync %u; tb %u/ms",
            C->frames, fps10 / 10, fps10 % 10,
            ms100(dt, perMs, gIvFrames) / 100, ms100(dt, perMs, gIvFrames) % 100,
@@ -3021,7 +3126,7 @@ void gl_frame_stats(void)
            ms100(gTGL + gTSwap, perMs, gIvFrames) / 100, ms100(gTGL + gTSwap, perMs, gIvFrames) % 100,
            (long)(gFinishN / gIvFrames), ms100(gTFinish, perMs, gIvFrames) / 100, ms100(gTFinish, perMs, gIvFrames) % 100,
            (long)(gNFastTri / gIvFrames), (long)(gNPos / gIvFrames), (long)(gNAttr / gIvFrames),
-           (long)(gStatMT / gIvFrames),
+           (long)(gStatMT / gIvFrames), (long)(gStatTnl / gIvFrames),
            gStatDE / gIvFrames, gStatDEslow / gIvFrames,
            ms100(gTVerts, perMs, gIvFrames) / 100, ms100(gTVerts, perMs, gIvFrames) % 100,
            gStatClip / gIvFrames, ms100(gTClip, perMs, gIvFrames) / 100, ms100(gTClip, perMs, gIvFrames) % 100,
@@ -3041,6 +3146,6 @@ void gl_frame_stats(void)
         gTGL = 0;
         gTFinish = gFinishN = 0;
         gNPos = gNAttr = gNFastTri = 0;
-        gStatMT = 0;
+        gStatMT = gStatTnl = 0;
     }
 }

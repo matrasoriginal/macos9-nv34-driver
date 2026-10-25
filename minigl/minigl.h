@@ -58,6 +58,11 @@ typedef struct HwState {
     GLenum  minFilter, magFilter, wrapS, wrapT;
     HwTex  *tex1;                   /* q3-12: jednotka 1 (GL_MODULATE), NULL = len jedna textúra */
     GLenum  minFilter1, magFilter1, wrapS1, wrapT1;
+    /* q3-16: HW T&L — vrcholy v súradniciach objektu, GPU ich násobí maticou mat (po riadkoch,
+     * MVP × okno), oreže a odstráni odvrátené steny */
+    int     tnl;
+    const float *mat; NVU32 matGen;
+    int     cull; GLenum cullFace, frontFace;
 } HwState;
 
 int     hw_init(void);                                  /* 1 = GPU pripravené */

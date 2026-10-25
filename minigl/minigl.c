@@ -1096,6 +1096,7 @@ static void tex_env(GLenum target, GLenum pname, GLint v)
     if (C->unit) {
         if (pname == GL_TEXTURE_ENV_MODE)
             C->texEnv1 = v;
+        ONCE(0x5C400000 | ((pname & 0xff) << 16) | (v & 0xffff), "glTexEnv jednotky %d: %x = %x", C->unit, pname, v);
         return;
     }
     if (target != GL_TEXTURE_ENV || pname != GL_TEXTURE_ENV_MODE) {
@@ -1860,6 +1861,7 @@ void glActiveTextureARB(GLenum u)
         gTexDbgN++;
         lg("glActiveTextureARB %x", u);
     }
+    ONCE(0x5C200000 | (u & 0xff), "glActiveTextureARB %x (prvykrat)", u);
     C->unit = u >= 0x84C0 && u < 0x84C0 + 32 ? (int)(u - 0x84C0) : 0;
     if (C->unit && !C->bound1)
         C->bound1 = &C->def;
@@ -1872,6 +1874,7 @@ void glClientActiveTextureARB(GLenum u)
         gTexDbgN++;
         lg("glClientActiveTextureARB %x", u);
     }
+    ONCE(0x5C300000 | (u & 0xff), "glClientActiveTextureARB %x (prvykrat)", u);
     C->cunit = u >= 0x84C0 && u < 0x84C0 + 32 ? (int)(u - 0x84C0) : 0;
 }
 
@@ -1879,6 +1882,7 @@ static void texc1(float s, float t, float r, float q)
 {
     if (!C)
         return;
+    ONCE(0x5C600000, "glMultiTexCoord jednotky 1 (prvykrat)");
     C->curTex1[0] = s; C->curTex1[1] = t; C->curTex1[2] = r; C->curTex1[3] = q;
 }
 
@@ -2499,6 +2503,7 @@ static void enable(GLenum cap, int on)
         }
     }
     if (C->unit && cap == GL_TEXTURE_2D) {
+        ONCE(0x5C500000 | on, "%s(GL_TEXTURE_2D) na jednotke %d (prvykrat)", on ? "glEnable" : "glDisable", C->unit);
         C->tex2D1 = on;                             /* dávka sa prepne v batch_begin (active_tex1) */
         return;
     }
@@ -2797,6 +2802,7 @@ GLenum glGetError(void)
 
 const GLubyte *glGetString(GLenum name)
 {
+    ONCE(0x5C000000 | (name & 0xffff), "glGetString %x", name);    /* wolf-6: čo hra zisťuje */
     switch (name) {
     case GL_VENDOR:     return (const GLubyte *)"NVIDIA Corporation (NV34 MiniGL)";
     case GL_RENDERER:   return (const GLubyte *)"NV34 MiniGL GeForce FX Go5200";
@@ -2833,7 +2839,10 @@ static int get_values(GLenum p, double *o)
     case GL_MAX_TEXTURE_SIZE: o[0] = 2048; return 1;
     case GL_MAX_MODELVIEW_STACK_DEPTH: case 0x0D38: case 0x0D39: o[0] = STACK_DEPTH; return 1;
     case 0x0D35:           o[0] = 8; return 1;                                         /* MAX_ATTRIB_STACK_DEPTH */
-    case 0x84E2:           o[0] = gMT ? 2 : 1; return 1;                                         /* MAX_TEXTURE_UNITS_ARB */
+    case 0x84E2:                                                                              /* MAX_TEXTURE_UNITS_ARB */
+        ONCE(0x5C100000, "glGet MAX_TEXTURE_UNITS_ARB = %d", gMT ? 2 : 1);
+        o[0] = gMT ? 2 : 1;
+        return 1;
     case 0x84E0:           o[0] = 0x84C0 + C->unit; return 1;                          /* ACTIVE_TEXTURE_ARB */
     case 0x84E1:           o[0] = 0x84C0 + C->cunit; return 1;                         /* CLIENT_ACTIVE_TEXTURE_ARB */
     case GL_DEPTH_BITS:    o[0] = C->depthBits ? (C->rt.z16 ? 16 : 24) : 0; return 1;

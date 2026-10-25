@@ -75,10 +75,9 @@ static void delay_us(UInt32 us)
 }
 
 /* rozdiel slučiek s 12 a 4 závislými sčítaniami = 8 taktov na iteráciu (ako MiniGL q3-14) */
-static UInt32 loop_tb(int twelve)
+static UInt32 loop_tb_n(int twelve, long n)
 {
     UInt32 t0, t1, x = 1;
-    long n = 1000000;
     t0 = tb();
     if (twelve)
         __asm__ volatile("mtctr %1\n"
@@ -94,10 +93,30 @@ static UInt32 loop_tb(int twelve)
     return t1 - t0;
 }
 
+static UInt32 loop_tb(int twelve)
+{
+    return loop_tb_n(twelve, 1000000);
+}
+
 static UInt32 cpu_mhz(void)
 {
     UInt32 a = loop_tb(0), b = loop_tb(1);
     return b > a ? (UInt32)(8.0 * gTbFreq / (b - a)) : 0;
+}
+
+/* cpu-4: najrýchlejšia z 300 krátkych slučiek (~50 µs) — bez prerušení; rozdiel voči cpu_mhz =
+ * čas, ktorý berú prerušenia */
+static UInt32 cpu_mhz_min(void)
+{
+    UInt32 a = 0xffffffff, b = 0xffffffff, t;
+    int i;
+    for (i = 0; i < 300; i++) {
+        if ((t = loop_tb_n(0, 5000)) < a)
+            a = t;
+        if ((t = loop_tb_n(1, 5000)) < b)
+            b = t;
+    }
+    return b > a ? (UInt32)(8.0 * 5000 * gTbFreq / (b - a)) : 0;
 }
 
 static volatile UInt8 *gFreq, *gVolt, *gSlew;
@@ -124,7 +143,7 @@ static UInt32 tb_per_sec(void)
 
 /* čítanie 4 MB z RAM (zbernica + pamäť), MB/s podľa skutočných tb/s */
 static UInt32 *gMem;
-#define MEM_WORDS (1u << 20)
+#define MEM_WORDS (1u << 19)                       /* 2 MB (L2 512 KB) */
 
 static UInt32 mem_mbs(UInt32 tbs)
 {
@@ -136,17 +155,18 @@ static UInt32 mem_mbs(UInt32 tbs)
     for (k = 0; k < 4; k++)
         for (i = 0; i < MEM_WORDS; i += 8)
             sum += gMem[i];                         /* jedno slovo na 32 B riadok cache */
+    /* 4 prechody × 2 MB */
     sink = sum;
     (void)sink;
-    return (UInt32)(4.0 * 4.0 * tbs / (double)(tb() - t0));
+    return (UInt32)(4.0 * 2.0 * tbs / (double)(tb() - t0));
 }
 
 static void state(const char *when)
 {
-    UInt32 tbs = tb_per_sec(), mhz = cpu_mhz();
-    out("%s: %lu MHz (tb), timebase %lu Hz podla TickCount -> skutocne %lu MHz, citanie RAM %lu MB/s; "
-        "frequency-gpio %02x, voltage-gpio %02x, slewing-done %02x\n", when, mhz, tbs,
-        (UInt32)((double)mhz * tbs / gTbFreq), mem_mbs(tbs), *gFreq, *gVolt, *gSlew);
+    UInt32 tbs = tb_per_sec(), mhz = cpu_mhz(), mn = cpu_mhz_min();
+    out("%s: %lu MHz (dlha slucka), %lu MHz (bez preruseni, prerusenia %lu %%), timebase %lu Hz, "
+        "citanie RAM %lu MB/s; frequency-gpio %02x, voltage-gpio %02x, slewing-done %02x\n", when, mhz, mn,
+        mn > mhz ? (mn - mhz) * 100 / mn : 0, tbs, mem_mbs(tbs), *gFreq, *gVolt, *gSlew);
 }
 
 /* čaká na slewing-done (bit 0x02), max. 100 ms; vráti µs alebo 0 pri timeoute */
@@ -210,7 +230,17 @@ static int run(void)
     if (!gFreq || !gVolt || !gSlew)
         return 0;
 
-    gMem = (UInt32 *)NewPtrClear(MEM_WORDS * 4);
+    {
+        OSErr err;
+        Handle h = TempNewHandle(MEM_WORDS * 4, &err);   /* halda aplikácie je malá (cpu-3: 0 MB/s) */
+        if (h) {
+            HLock(h);
+            gMem = (UInt32 *)*h;
+        } else {
+            gMem = (UInt32 *)NewPtr(MEM_WORDS * 4);
+        }
+        out("pamat na meranie RAM: %s\n", gMem ? "ok" : "nie je");
+    }
     EventAvail(0, &ev);
     low = (ev.modifiers & 0x0800) != 0;             /* optionKey */
     state("pred");
@@ -254,7 +284,7 @@ int main(void)
     unsigned long secs;
     gLog = fopen("NV34 CPU.txt", "a");
     GetDateTime(&secs);
-    out("\n==== NV34 CPU 2 — %lu s od 1904, %lu s od startu (Option = znizeny takt)\n", secs,
+    out("\n==== NV34 CPU 3 — %lu s od 1904, %lu s od startu (Option = znizeny takt)\n", secs,
         TickCount() / 60);
     run();
     if (gLog)

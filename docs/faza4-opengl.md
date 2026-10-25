@@ -643,3 +643,5 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
 - q3-17: T&L predvolene zapnuté (`nv34glnotnl` = vypnuté), FRONT_FACE bez otočenia
   (`nv34gltnlcw` = otočené). V T&L dávke textúrové súradnice len s, t → 6 slov na vrchol
   (s dvoma textúrami 8 namiesto 12); `nv34gltnl4` = 4 floaty.
+- q3-17 výsledok: Quake III timedemo **55,8 fps**, textúry s 2 floatmi v poriadku. Wolfenstein
+  v náročnej scéne ~20 fps: snímka 51 ms, MiniGL 12 ms (~9400 troj.), zvyšok hra na CPU.

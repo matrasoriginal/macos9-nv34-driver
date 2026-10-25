@@ -33,9 +33,16 @@ používajú ďalej; naša knižnica platí iba pre hru, v ktorej priečinku le�
 | **Unreal Tournament** | NV34 RAVE | v štartovacom dialógu zvoliť RAVE | 30–50 fps |
 | **Quake II** | MiniGL | `OpenGLLibrary` do priečinka hry, ovládač OpenGL | timedemo 53–54 fps |
 | **Half-Life** (Xash3D, SDL „macosclassic“) | MiniGL | `OpenGLLibrary` do priečinka hry; `valve:video.cfg` celá obrazovka **len v 1024×768** | 25–75 fps |
-| **Quake III** (MacQuake3 1.1x) | MiniGL | `OpenGLLibrary` do priečinka hry; dáta zhodné s verziou aplikácie (pre 1.1x iba `pak0.pk3`); v Get Info viac pamäte | timedemo 37 fps |
+| **Quake III** (MacQuake3 1.1x) | MiniGL | `OpenGLLibrary` do priečinka hry; dáta zhodné s verziou aplikácie (pre 1.1x iba `pak0.pk3`); v Get Info viac pamäte | timedemo 55–56 fps |
+| **Return to Castle Wolfenstein** | MiniGL | `OpenGLLibrary` do priečinka hry; v Get Info aspoň 256 MB pamäte | 15–90 fps (náročné scény ~20 fps, brzdí CPU) |
 
 Bez `OpenGLLibrary` v priečinku hra použije Apple OpenGL (softvérové, pomalé).
+
+MiniGL podporuje dve textúry naraz (GL_ARB_multitexture) a v `glDrawElements` hardvérovú
+transformáciu (T&L) — polohy vrcholov, orezanie a odvrátené steny počíta GPU.
+
+Procesor PowerBooku 6,2 beží pod Mac OS 9 na ~750 MHz namiesto 1 GHz (PMU ho neprepne
+na plnú rýchlosť, Mac OS 9 o tom nevie). Hry s náročnou logikou (Wolfenstein) brzdí CPU.
 
 ## Známe obmedzenia
 
@@ -43,7 +50,7 @@ Bez `OpenGLLibrary` v priečinku hra použije Apple OpenGL (softvérové, pomal�
 - **Quake III**: raz po studenom štarte zaseknutie GPU hneď pri spustení („hw_sync: GPU nedobehol
   do 2 s“ v logu); neopakovalo sa. Pri zamrznutí reštart a znova.
 - MiniGL nemá: stencil buffer (tiene `cg_shadows 2`), `glClipPlane` (zrkadlá/portály),
-  multitextúru, hmlu, `glDrawPixels`/`glBitmap`, display listy.
+  hmlu (Wolfenstein bez hmly), `glDrawPixels`/`glBitmap`, display listy.
 - Škálované režimy 800×600 a 640×480 sú rozmazané (FP scaler panelu).
 
 ## Záchrana
@@ -69,6 +76,9 @@ Viac volieb naraz oddeliť medzerou: `setenv boot-args "nv34glstats nv34gldebug"
 | `nv34gldebug` | MiniGL | podrobný log (pixel formát, každá výmena snímky) |
 | `nv34gltex` | MiniGL | log textúr a dávok (prvých 3000 riadkov) |
 | `nv34glvtx12`, `nv34glcolorle` | MiniGL | pôvodný formát vrcholov / opačné poradie bajtov farby |
+| `nv34glnomt` | MiniGL | bez multitextúry |
+| `nv34glnotnl` | MiniGL | bez HW T&L (transformácia na CPU) |
+| `nv34glz24` | MiniGL | vždy 24-bitový z-buffer (inak Z16 pri 16 bpp, ak hra pýta ≤ 16 bitov) |
 
 MiniGL vždy zapisuje stručný log do `Systémová zložka:Preferences:NV34 MiniGL log.txt`
 (načítanie, kontext, zadný buffer, chyby, voľná VRAM pri ukončení).

@@ -1223,7 +1223,7 @@ static int gPBn, gPBprim;
 static TexObj *gPBtex, *gPBtex1;
 static int gPBtnl;                              /* q3-16: dávka v súradniciach objektu (HW T&L) */
 static float gTnlMat[16];                       /* zložená matica okno × MVP po riadkoch */
-static float gTnlProj[16], gTnlMV[16];          /* hmla: okno × P a MODELVIEW zvlášť (po riadkoch) */
+static float gTnlMV[16];                        /* hmla: MODELVIEW (po riadkoch) pre vzdialenosť v oku */
 static NVU32 gTnlGen, gTnlXf;
 static int gTnlRtH;
 
@@ -1300,7 +1300,7 @@ static void fill_state(HwState *st, TexObj *tex)
     }
     if (gPBtnl) {
         st->tnl = 1;
-        st->mat = st->fog ? gTnlProj : gTnlMat;
+        st->mat = gTnlMat;
         st->mv = st->fog ? gTnlMV : 0;
         st->matGen = gTnlGen;
         st->cull = s->cull;
@@ -1481,7 +1481,6 @@ static void project(HwVtx *o, const V *v, int texActive)
     o->sq1 = v->s1 * iw;
     o->tq1 = v->t1 * iw;
     o->q1 = v->q1 * iw;
-    o->f = iw;
     o->c = pack_rgba(o->r, o->g, o->b, o->a);
 }
 
@@ -2124,7 +2123,7 @@ static void lc_pos_tnl(int ci)
 static void tnl_matrix(void)
 {
     GLS *s = &C->s;
-    const float *m, *pm, *mv;
+    const float *m, *mv;
     float hw, hh, tx, ty, dd, tz;
     int c;
     if (gTnlGen && gTnlXf == gXformGen && gTnlRtH == C->rt.h)
@@ -2149,14 +2148,8 @@ static void tnl_matrix(void)
         gTnlMat[8 + c] = dd * col[2] + tz * col[3];
         gTnlMat[12 + c] = col[3];
     }
-    pm = C->mstack[1][C->msp[1]];
     mv = C->mstack[0][C->msp[0]];
     for (c = 0; c < 4; c++) {
-        const float *col = pm + c * 4;
-        gTnlProj[c] = hw * col[0] + tx * col[3];
-        gTnlProj[4 + c] = -hh * col[1] + ty * col[3];
-        gTnlProj[8 + c] = dd * col[2] + tz * col[3];
-        gTnlProj[12 + c] = col[3];
         gTnlMV[c] = mv[c * 4];
         gTnlMV[4 + c] = mv[c * 4 + 1];
         gTnlMV[8 + c] = mv[c * 4 + 2];
@@ -2292,7 +2285,6 @@ static void lc_attr(int ci)
     w->sq = sv * p[3];
     w->tq = tv * p[3];
     w->q = qv * p[3];
-    w->f = p[3];
     w->c = c;
     if (gPrep.tex1) {
         float s1, t1, q1 = 1.0f;

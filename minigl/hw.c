@@ -85,8 +85,7 @@ static long hwTnl = -1, hwMatGen = -1, hwCull = -1, hwMv = -1;
 static long hwFin = -1, hwFogOn = -1;
 static NVU32 hwFogK[6];
 static int gVtx12 = -1, gColorBE, gCompact;        /* formát vrcholu (opt-5, q3-17) */
-/* hmla mimo T&L: vo vrchole súradnica hmly (atribút 5 = vzdialenosť w) za farbou */
-static int gFogV, gNoFog, gFogRadial;
+static int gNoFog, gFogRadial;
 
 static void invalidate(void)
 {
@@ -302,7 +301,7 @@ static void vtx_init(void)
 
 static void set_vtxfmt(int tex)
 {
-    int i, key = tex | (gCompact << 4) | (gFogV << 5);
+    int i, key = tex | (gCompact << 4);
     if (hwFmt == key)
         return;
     begin(M_VTXFMT, 16);
@@ -318,11 +317,10 @@ static void set_vtxfmt(int tex)
                  (i == 8 && tex) ? (0x2 | (2u << 4) | st) :
                  (i == 9 && tex == 2) ? (0x2 | (2u << 4) | st) : 0x2);
     } else {
-        NVU32 st = ((tex == 2 ? 48u : tex ? 32u : 16u) + (gFogV ? 4u : 0u)) << 8;   /* q3-12: 2 textúry = 12 slov */
+        NVU32 st = (tex == 2 ? 48u : tex ? 32u : 16u) << 8;   /* q3-12: 2 textúry = 12 slov */
         for (i = 0; i < 16; i++)
             data(i == 0 ? (0x2 | (3u << 4) | st) :           /* V32_FLOAT × 3 */
                  i == 3 ? (0x4 | (4u << 4) | st) :           /* U8_UNORM × 4 */
-                 (i == 5 && gFogV) ? (0x2 | (1u << 4) | st) :  /* hmla: V32_FLOAT × 1 */
                  (i == 8 && tex) ? (0x2 | (4u << 4) | st) :
                  (i == 9 && tex == 2) ? (0x2 | (4u << 4) | st) : 0x2);
     }
@@ -447,8 +445,8 @@ static void tnl_state(const HwState *st)
         hwTnl = st->tnl;
         gCompact = st->tnl && !gTnl4 && !gVtx12;
     }
-    /* hmla: MODELVIEW zvlášť (GPU berie vzdialenosť v priestore oka), inak identita a v PROJECTION
-     * celá matica */
+    /* PROJECTION = celá matica okno × MVP (poloha, ako nouveau nv20_emit_projection); MODELVIEW len pre
+     * vzdialenosť hmly v priestore oka, inak identita */
     if (st->tnl && (hwMatGen != (long)st->matGen || hwMv != (st->mv != 0))) {
         mat_upload(M_PROJECTION0, st->mat);
         if (st->mv || hwMv)
@@ -516,7 +514,8 @@ int hw_state(HwTarget *t, const HwState *st)
     }
     /* final combiner: farba = D (primárna / spare0); s hmlou A·B + (1−A)·C, A = FOG.a (faktor hmly),
      * B = farba, C = FOG.rgb (farba hmly) ako v nouveau nv10_state_frag.c */
-    fog = st->fog && !gNoFog && !gVtx12;
+    /* wolf-8: len pri T&L — zdroj 6 (súradnica z vrcholu, NV20) NV30 odmietol (DATA_ERROR na 0x8c8) */
+    fog = st->fog && st->tnl && !gNoFog && !gVtx12;
     key = (mode != 0) | (fog << 1);
     if (hwFin != key) {
         NVU32 col = mode ? 0x0c : 0x04;
@@ -526,17 +525,16 @@ int hw_state(HwTarget *t, const HwState *st)
         data(0x01000101);
         hwFin = key;
     }
-    gFogV = fog && !st->tnl;
     if (fog) {
-        /* zdroj: pri T&L vzdialenosť od roviny oka |z| (ORTHOGONAL_ABS, režimy UNSIGNED — predvolené
-         * v Mesa), boot-args nv34glfogradial = radiálna; mimo T&L súradnica z vrcholu (FOG, SIGNED) */
-        int uns = st->tnl && !gFogRadial;
+        /* zdroj: vzdialenosť od roviny oka |z| (ORTHOGONAL_ABS, režimy UNSIGNED — predvolené v Mesa),
+         * boot-args nv34glfogradial = radiálna (SIGNED) */
+        int uns = !gFogRadial;
         NVU32 k[6];
         int i;
         union { float f; NVU32 u; } a, b;
         a.f = st->fogK[0];
         b.f = st->fogK[1];
-        k[0] = st->tnl ? (gFogRadial ? 1 : 3) : 6;
+        k[0] = gFogRadial ? 1 : 3;
         k[1] = st->fogMode == GL_LINEAR ? (uns ? 0x0804 : 0x2601) :
                st->fogMode == GL_EXP2 ? (uns ? 0x0803 : 0x0801) : (uns ? 0x0802 : 0x0800);
         k[2] = a.u;
@@ -549,7 +547,7 @@ int hw_state(HwTarget *t, const HwState *st)
             static int logged;
             if (!logged) {
                 logged = 1;
-                lg("hmla: zdroj %u, rezim %x, k %f %f, farba %x (T&L %d)", k[0], k[1], (double)a.f, (double)b.f,
+                lg("hmla: zdroj %u, rezim %x, k %f %f/1e6, farba %x (T&L %d)", k[0], k[1], (double)a.f, (double)b.f * 1e6,
                    k[5], st->tnl);
             }
             begin(M_FOG_COORD_DIST, 5);
@@ -663,7 +661,7 @@ void hw_draw(int prim, const HwVtx *v, int n, int textured)
         return;
     vtx_init();
     wpv = gVtx12 ? (textured ? 12 : 8) : gCompact ? (textured == 2 ? 8 : textured ? 6 : 4) :
-          (textured == 2 ? 12 : textured ? 8 : 4) + gFogV;
+          (textured == 2 ? 12 : textured ? 8 : 4);
     set_vtxfmt(textured);
     begin(M_VERTEX_BEGIN_END, 1);
     data(prim);
@@ -704,23 +702,6 @@ void hw_draw(int prim, const HwVtx *v, int n, int textured)
                     p += 8;
                 } else {
                     p += 6;
-                }
-            }
-        } else if (gFogV) {                           /* hmla: za farbou vzdialenosť w = 1/f */
-            for (i = 0; i < cnt; i++, v++) {
-                p[0] = v->x; p[1] = v->y; p[2] = v->z;
-                ((volatile NVU32 *)p)[3] = vcolor(v);
-                p[4] = v->f > 0 ? 1.0f / v->f : 0.0f;
-                if (textured) {
-                    p[5] = v->sq; p[6] = v->tq; p[7] = 0.0f; p[8] = v->q;
-                    if (textured == 2) {
-                        p[9] = v->sq1; p[10] = v->tq1; p[11] = 0.0f; p[12] = v->q1;
-                        p += 13;
-                    } else {
-                        p += 9;
-                    }
-                } else {
-                    p += 5;
                 }
             }
         } else if (textured == 2) {

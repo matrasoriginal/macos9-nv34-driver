@@ -18,6 +18,7 @@
 #include <MacTypes.h>
 #include <Events.h>
 #include <OSUtils.h>
+#include <MacMemory.h>
 typedef SInt32 OSStatus;
 
 typedef struct RegEntryID { UInt32 contents[4]; } RegEntryID;
@@ -107,10 +108,45 @@ static void gpio_w(volatile UInt8 *p, UInt8 v)
     __asm__ volatile("eieio\n sync" ::: "memory");
 }
 
+/* cpu-3: timebase voči TickCount (VIA, nezávislé od zbernice) za 1 s → skutočné tb/s */
+static UInt32 tb_per_sec(void)
+{
+    UInt32 t, t0, b0;
+    t = TickCount();
+    while (TickCount() == t)
+        ;
+    t0 = TickCount();
+    b0 = tb();
+    while (TickCount() - t0 < 60)
+        ;
+    return (UInt32)((double)(tb() - b0) * 60.15 / 60.0);   /* tick = 1/60,15 s */
+}
+
+/* čítanie 4 MB z RAM (zbernica + pamäť), MB/s podľa skutočných tb/s */
+static UInt32 *gMem;
+#define MEM_WORDS (1u << 20)
+
+static UInt32 mem_mbs(UInt32 tbs)
+{
+    UInt32 i, t0, sum = 0, k;
+    volatile UInt32 sink;
+    if (!gMem)
+        return 0;
+    t0 = tb();
+    for (k = 0; k < 4; k++)
+        for (i = 0; i < MEM_WORDS; i += 8)
+            sum += gMem[i];                         /* jedno slovo na 32 B riadok cache */
+    sink = sum;
+    (void)sink;
+    return (UInt32)(4.0 * 4.0 * tbs / (double)(tb() - t0));
+}
+
 static void state(const char *when)
 {
-    out("%s: %lu MHz, frequency-gpio %02x, voltage-gpio %02x, slewing-done %02x\n", when, cpu_mhz(), *gFreq,
-        *gVolt, *gSlew);
+    UInt32 tbs = tb_per_sec(), mhz = cpu_mhz();
+    out("%s: %lu MHz (tb), timebase %lu Hz podla TickCount -> skutocne %lu MHz, citanie RAM %lu MB/s; "
+        "frequency-gpio %02x, voltage-gpio %02x, slewing-done %02x\n", when, mhz, tbs,
+        (UInt32)((double)mhz * tbs / gTbFreq), mem_mbs(tbs), *gFreq, *gVolt, *gSlew);
 }
 
 /* čaká na slewing-done (bit 0x02), max. 100 ms; vráti µs alebo 0 pri timeoute */
@@ -174,6 +210,7 @@ static int run(void)
     if (!gFreq || !gVolt || !gSlew)
         return 0;
 
+    gMem = (UInt32 *)NewPtrClear(MEM_WORDS * 4);
     EventAvail(0, &ev);
     low = (ev.modifiers & 0x0800) != 0;             /* optionKey */
     state("pred");
@@ -181,6 +218,7 @@ static int run(void)
         UInt32 us;
         if (*gFreq & 0x01) {
             out("uz na plnom takte\n");
+            state("o 2 s");
             return 1;
         }
         gpio_w(gVolt, 0x05);                        /* najprv vyššie napätie */
@@ -206,6 +244,8 @@ static int run(void)
         delay_us(10000);
     }
     state("po");
+    state("o 2 s");
+    state("o 4 s");
     return 1;
 }
 
@@ -214,7 +254,7 @@ int main(void)
     unsigned long secs;
     gLog = fopen("NV34 CPU.txt", "a");
     GetDateTime(&secs);
-    out("\n==== NV34 CPU 1 — %lu s od 1904, %lu s od startu (Option = znizeny takt)\n", secs,
+    out("\n==== NV34 CPU 2 — %lu s od 1904, %lu s od startu (Option = znizeny takt)\n", secs,
         TickCount() / 60);
     run();
     if (gLog)

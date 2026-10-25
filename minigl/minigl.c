@@ -2890,12 +2890,29 @@ void glGetDoublev(GLenum p, GLdouble *v)
         v[i] = o[i];
 }
 
+/* wolf-7: konštanty aj bez aktuálneho kontextu (Wolfenstein ukázal GL_MAX_ACTIVE_TEXTURES_ARB 0,
+ * hoci glGet 0x84E2 do get_values neprišiel) */
+static int get_noctx(GLenum p, double *o)
+{
+    ONCE(0x5D000000 | (p & 0xffff), "glGet %x bez kontextu", p);
+    o[0] = p == 0x84E2 ? (gMT ? 2 : 1) : p == GL_MAX_TEXTURE_SIZE ? 2048 : 0;
+    return 1;
+}
+
+static int get_any(GLenum p, double *o)
+{
+    if (!C)
+        return get_noctx(p, o);
+    ONCE(0x5E000000 | (p & 0xffff), "glGet %x (prvykrat)", p);
+    return get_values(p, o);
+}
+
 void glGetFloatv(GLenum p, GLfloat *v)
 {
     double o[16];
     int n, i;
-    CHECK();
-    n = get_values(p, o);
+    GLT;
+    n = get_any(p, o);
     for (i = 0; i < n; i++)
         v[i] = (GLfloat)o[i];
 }
@@ -2904,8 +2921,8 @@ void glGetIntegerv(GLenum p, GLint *v)
 {
     double o[16];
     int n, i;
-    CHECK();
-    n = get_values(p, o);
+    GLT;
+    n = get_any(p, o);
     for (i = 0; i < n; i++)
         v[i] = (GLint)(o[i] + (o[i] < 0 ? -0.5 : 0.5));
 }
@@ -2914,8 +2931,8 @@ void glGetBooleanv(GLenum p, GLboolean *v)
 {
     double o[16];
     int n, i;
-    CHECK();
-    n = get_values(p, o);
+    GLT;
+    n = get_any(p, o);
     for (i = 0; i < n; i++)
         v[i] = o[i] != 0;
 }

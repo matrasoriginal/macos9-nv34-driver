@@ -85,7 +85,7 @@ static long hwTnl = -1, hwMatGen = -1, hwCull = -1, hwMv = -1;
 static long hwFin = -1, hwFogOn = -1;
 static NVU32 hwFogK[6];
 static int gVtx12 = -1, gColorBE, gCompact;        /* formát vrcholu (opt-5, q3-17) */
-static int gNoFog, gFogRadial;
+static int gNoFog, gFogPlane;
 
 static void invalidate(void)
 {
@@ -295,7 +295,7 @@ static void vtx_init(void)
         gVtx12 = gl_boot_arg("nv34glvtx12");
         gColorBE = !gl_boot_arg("nv34glcolorle");   /* opt-7: GPU číta R v najvyššom bajte */
         gNoFog = gl_boot_arg("nv34glnofog");
-        gFogRadial = gl_boot_arg("nv34glfogradial");
+        gFogPlane = gl_boot_arg("nv34glfogplane");
     }
 }
 
@@ -526,15 +526,15 @@ int hw_state(HwTarget *t, const HwState *st)
         hwFin = key;
     }
     if (fog) {
-        /* zdroj: vzdialenosť od roviny oka |z| (ORTHOGONAL_ABS, režimy UNSIGNED — predvolené v Mesa),
-         * boot-args nv34glfogradial = radiálna (SIGNED) */
-        int uns = !gFogRadial;
+        /* zdroj: radiálna vzdialenosť (RADIAL, režimy SIGNED). wolf-9: ORTHOGONAL_ABS s UNSIGNED (NV20,
+         * predvolené v Mesa) na NV30 hmlu nedal → len boot-args nv34glfogplane (pokus) */
+        int uns = gFogPlane;
         NVU32 k[6];
         int i;
         union { float f; NVU32 u; } a, b;
         a.f = st->fogK[0];
         b.f = st->fogK[1];
-        k[0] = gFogRadial ? 1 : 3;
+        k[0] = gFogPlane ? 3 : 1;
         k[1] = st->fogMode == GL_LINEAR ? (uns ? 0x0804 : 0x2601) :
                st->fogMode == GL_EXP2 ? (uns ? 0x0803 : 0x0801) : (uns ? 0x0802 : 0x0800);
         k[2] = a.u;

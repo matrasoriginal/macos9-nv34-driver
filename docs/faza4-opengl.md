@@ -663,3 +663,14 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
 - q3-20 výsledok: **Quake III timedemo 61,3 fps** (z 55,8). Wolfenstein v náročnej scéne ~22 fps:
   snímka ~45 ms, ~12 000 troj., MiniGL ~9,5 ms (glEnd ~5,5, z toho zápis do push buffra vo VRAM
   ~3,7 ms ≈ 270 MB/s), hra ~35 ms na CPU (750 MHz).
+- wolf-8: hmla GL_FOG. Final combiner A·B + (1−A)·C (A = FOG.a, B = farba, C = FOG.rgb, ako nouveau
+  nv10_state_frag.c), metódy NV30 FOG_ENABLE 0x36c, FOG_COLOR 0x370, FOG_COORD_DIST 0x8c8, FOG_MODE
+  0x8cc, FOG_EQUATION 0x8d0–0x8d8; kódy režimov a koeficienty podľa nouveau NV20
+  (f = k0 + k1·d − 1, lineárna k0 = 2 + start/(end − start), k1 = −1/(end − start)).
+- wolf-8 výsledok: Wolfenstein hmla lineárna 0…2700, farba (0,4; 0,4; 0,45). Geometria rozbitá —
+  do PROJECTION som dal okno × P a do MODELVIEW MV; správne (nouveau nv20_emit_projection) je
+  PROJECTION = okno × MVP a MODELVIEW len pre vzdialenosť v oku. Zdroj 6 (súradnica z vrcholu,
+  NV20) NV30 odmietol (DATA_ERROR na 0x8c8, data 6) → zamrznutie; hmla len pri T&L.
+- wolf-9 výsledok: ORTHOGONAL_ABS (3) s režimom 0x804 (LINEAR_UNSIGNED) hmlu nedal, RADIAL (1)
+  s 0x2601 (LINEAR_SIGNED) funguje → radiálna predvolene (wolf-10), `nv34glfogplane` = pokus
+  s rovinou oka. Výkon bez zmeny (~24 fps v náročnej scéne s hmlou).

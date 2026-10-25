@@ -50,7 +50,8 @@ na plnú rýchlosť, Mac OS 9 o tom nevie). Hry s náročnou logikou (Wolfenstei
 - **Quake III**: raz po studenom štarte zaseknutie GPU hneď pri spustení („hw_sync: GPU nedobehol
   do 2 s“ v logu); neopakovalo sa. Pri zamrznutí reštart a znova.
 - MiniGL nemá: stencil buffer (tiene `cg_shadows 2`), `glClipPlane` (zrkadlá/portály),
-  hmlu (Wolfenstein bez hmly), `glDrawPixels`/`glBitmap`, display listy.
+  `glDrawPixels`/`glBitmap`, display listy. Hmla (GL_FOG) len pri HW T&L — geometria kreslená
+  inak (napr. s polygon offset) je bez hmly.
 - Škálované režimy 800×600 a 640×480 sú rozmazané (FP scaler panelu).
 
 ## Záchrana
@@ -78,6 +79,7 @@ Viac volieb naraz oddeliť medzerou: `setenv boot-args "nv34glstats nv34gldebug"
 | `nv34glvtx12`, `nv34glcolorle` | MiniGL | pôvodný formát vrcholov / opačné poradie bajtov farby |
 | `nv34glnomt` | MiniGL | bez multitextúry |
 | `nv34glnotnl` | MiniGL | bez HW T&L (transformácia na CPU) |
+| `nv34glnofog` | MiniGL | bez hmly (GL_FOG) |
 | `nv34glz24` | MiniGL | vždy 24-bitový z-buffer (inak Z16 pri 16 bpp, ak hra pýta ≤ 16 bitov) |
 
 MiniGL vždy zapisuje stručný log do `Systémová zložka:Preferences:NV34 MiniGL log.txt`

@@ -780,6 +780,7 @@ void MiniGLTerm(void)
     hw_sync();
     full_hide(0);
     gl_release_textures();
+    hw_vb_free();
     hw_pend_flush();
     for (i = 0; i < 16; i++)
         if (gCtxs[i]) {

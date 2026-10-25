@@ -98,6 +98,15 @@ static inline NVU32 pack_rgba(float r, float g, float b, float a)
 }
 void    hw_draw(int prim, const HwVtx *v, int n, int textured);  /* prim: 1 body, 2 čiary, 5 trojuholníky; textured 0/1/2 */
 
+/* q3-18: vrcholy vo VRAM (len T&L, kratší formát) + indexy */
+int     hw_vb_ready(void);
+volatile NVU32 *hw_vb_begin(NVU32 bytes);       /* miesto na zápis, 0 = nedá sa */
+NVU32   hw_vb_end(NVU32 used);                  /* vráti offset vo VRAM */
+void    hw_vb_put(volatile NVU32 *d, const HwVtx *v, int textured);
+void    hw_vb_free(void);
+void    hw_draw_indexed(int prim, NVU32 vbOff, int textured, const NVU16 *idx, int n);
+extern NVU32 gHwVbWaits;
+
 /* textúra: celý reťazec mipmáp v ARGB32 (úroveň 0 prvá), voliteľne iba úroveň 0 */
 HwTex  *hw_tex_new(void);
 void    hw_tex_free(HwTex *t);

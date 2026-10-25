@@ -1283,9 +1283,36 @@ static void fill_state(HwState *st, TexObj *tex)
     }
 }
 
-static long gStatTris, gStatBatches, gStatMT, gStatTnl;
+static long gStatTris, gStatBatches, gStatMT, gStatTnl, gStatVB, gStatVBv;
 static long gStatDE, gStatDEslow;             /* glDrawElements rýchla / pomalá cesta */
 static NVU32 gTVerts;                        /* čas pomalej cesty (glBegin/glArrayElement) */
+
+/* stav dávky (gPBtex, gPBtex1, gPBtnl) do GPU: textúry do VRAM, hw_state. -1 = nekresliť */
+static int batch_prepare(HwState *st)
+{
+    if (!C->hasRT || !hw_bind(&C->rt))
+        return -1;
+    if (gPBtex) {
+        int r = tex_prepare(gPBtex);
+        if (r < 0)                                  /* hl-9: bez VRAM radšej nekresliť (čierne štvorce) */
+            return -1;
+        if (!r)
+            gPBtex = 0;
+    }
+    if (gPBtex && gPBtex1) {                        /* q3-12: nahratie jednotky 1 nesmie vyhodiť jednotku 0 */
+        int r;
+        gTexPin = gPBtex->hw;
+        r = tex_prepare(gPBtex1);
+        gTexPin = 0;
+        if (r < 0)
+            return -1;
+        if (!r)
+            gPBtex1 = 0;
+    }
+    memset(st, 0, sizeof(*st));
+    fill_state(st, gPBtex);
+    return hw_state(&C->rt, st);
+}
 
 void gl_flush_batch(void)
 {
@@ -1295,35 +1322,12 @@ void gl_flush_batch(void)
     NVU32 t0;
     if (!gPBn || !C)
         return;
-    if (!C->hasRT || !hw_bind(&C->rt)) {
+    t0 = tb();
+    textured = batch_prepare(&st);
+    if (textured < 0) {
         gPBn = 0;
         return;
     }
-    t0 = tb();
-    if (gPBtex) {
-        int r = tex_prepare(gPBtex);
-        if (r < 0) {                                /* hl-9: bez VRAM radšej nekresliť (čierne štvorce) */
-            gPBn = 0;
-            return;
-        }
-        if (!r)
-            gPBtex = 0;
-    }
-    if (gPBtex && gPBtex1) {                        /* q3-12: nahratie jednotky 1 nesmie vyhodiť jednotku 0 */
-        int r;
-        gTexPin = gPBtex->hw;
-        r = tex_prepare(gPBtex1);
-        gTexPin = 0;
-        if (r < 0) {
-            gPBn = 0;
-            return;
-        }
-        if (!r)
-            gPBtex1 = 0;
-    }
-    memset(&st, 0, sizeof(st));
-    fill_state(&st, gPBtex);
-    textured = hw_state(&C->rt, &st);
     if (gTexDbg && gTexDbgN < 3000 && first_time(0x5E000000 ^ (gPBtex ? gPBtex->name : 0) ^ ((NVU32)textured << 20) ^
                                                   ((NVU32)C->s.texEnv << 8) ^ ((NVU32)st.blend << 21))) {
         gTexDbgN++;
@@ -2270,6 +2274,70 @@ static void lc_attr(int ci)
 /* q3-11: počty v rýchlej ceste (q3-12: bez meračov času vo vnútornej slučke) */
 static NVU32 gNPos, gNAttr, gNFastTri;
 
+/* q3-18: T&L s vrcholmi vo VRAM — každý použitý vrchol volania sa zapíše raz (slot podľa prvého
+ * použitia), trojuholníky idú ako 16-bit indexy. 0 = nedá sa (stará cesta cez dávku). */
+#define IDX_MAX 32768
+static NVU16 gIdx[IDX_MAX];
+static NVU16 gVSlot[LC_MAX];
+
+static int draw_tris_vb(GLsizei count, GLenum type, const GLvoid *idx, TexObj *tx0, TexObj *tx1)
+{
+    HwState st;
+    volatile NVU32 *vb;
+    NVU32 off, t0;
+    int textured, wpv, nv = 0, maxv;
+    GLsizei i;
+
+    count -= count % 3;
+    if (count > IDX_MAX || !hw_vb_ready())
+        return 0;
+    if (gPBn)
+        gl_flush_batch();
+    t0 = tb();
+    gPBtex = tx0;
+    gPBtex1 = tx1;
+    gPBtnl = 1;
+    gPBprim = 5;
+    textured = batch_prepare(&st);
+    if (textured < 0)
+        return 1;
+    wpv = textured == 2 ? 8 : textured ? 6 : 4;
+    maxv = count < gLcCount ? count : gLcCount;
+    vb = hw_vb_begin((NVU32)maxv * wpv * 4);
+    if (!vb)
+        return 0;
+    gTFlush += tb() - t0;
+    for (i = 0; i < count; i++) {
+        int k = (type == GL_UNSIGNED_BYTE ? ((const GLubyte *)idx)[i] :
+                 type == GL_UNSIGNED_SHORT ? ((const GLushort *)idx)[i] : (GLint)((const GLuint *)idx)[i]) - gLcBase;
+        if (gPStamp[k] != gPGen) {
+            lc_pos_tnl(k);
+            gNPos++;
+        }
+        if (gAStamp[k] != gAGen) {
+            lc_attr(k);
+            gNAttr++;
+            gVSlot[k] = (NVU16)nv;
+            hw_vb_put(vb + nv * wpv, &gLV[k], textured);
+            nv++;
+        }
+        gIdx[i] = gVSlot[k];
+    }
+    t0 = tb();
+    off = hw_vb_end((NVU32)nv * wpv * 4);
+    hw_draw_indexed(5, off, textured, gIdx, count);
+    gTFlush += tb() - t0;
+    gNFastTri += count / 3;
+    gStatTris += count / 3;
+    gStatTnl += count / 3;
+    gStatVB += count / 3;
+    gStatVBv += nv;
+    if (textured == 2)
+        gStatMT += count / 3;
+    gStatBatches++;
+    return 1;
+}
+
 static int draw_tris_fast(GLsizei count, GLenum type, const GLvoid *idx)
 {
     GLS *s = &C->s;
@@ -2326,6 +2394,8 @@ static int draw_tris_fast(GLsizei count, GLenum type, const GLvoid *idx)
             gAGen = 1;
         }
     }
+    if (tnl && draw_tris_vb(count, type, idx, tx0, tx1))
+        return 1;
     if (tnl) {                                      /* orezanie a odvrátené steny robí GPU */
         for (i = 0; i + 2 < count; i += 3) {
             int j, c[3];
@@ -3141,7 +3211,7 @@ void gl_frame_stats(void)
             cpu_props();
         }
         lg("snimky %d: %u.%u fps, ms/snimku: celkom %u.%02u, glEnd %u.%02u (z toho davky %u.%02u, cakanie GPU %u.%02u), swap %u.%02u; "
-           "MiniGL spolu %u.%02u ms (glFinish %d× %u.%02u ms); rychla cesta: %d troj., poz. %d, atrib. %d; 2 textury %d troj., T&L %d troj.; DrawElements %d/%d pomalych (%u.%02u ms); orezanych %d troj. (%u.%02u ms, pas %u.%02u); "
+           "MiniGL spolu %u.%02u ms (glFinish %d× %u.%02u ms); rychla cesta: %d troj., poz. %d, atrib. %d; 2 textury %d troj., T&L %d troj., VRAM %d troj. / %d vrch. (cakanie %u); DrawElements %d/%d pomalych (%u.%02u ms); orezanych %d troj. (%u.%02u ms, pas %u.%02u); "
            "%d troj./snimku, %d davok; nahrati %u (+%u ciastocnych, %u KB), sync %u; tb %u/ms",
            C->frames, fps10 / 10, fps10 % 10,
            ms100(dt, perMs, gIvFrames) / 100, ms100(dt, perMs, gIvFrames) % 100,
@@ -3152,7 +3222,8 @@ void gl_frame_stats(void)
            ms100(gTGL + gTSwap, perMs, gIvFrames) / 100, ms100(gTGL + gTSwap, perMs, gIvFrames) % 100,
            (long)(gFinishN / gIvFrames), ms100(gTFinish, perMs, gIvFrames) / 100, ms100(gTFinish, perMs, gIvFrames) % 100,
            (long)(gNFastTri / gIvFrames), (long)(gNPos / gIvFrames), (long)(gNAttr / gIvFrames),
-           (long)(gStatMT / gIvFrames), (long)(gStatTnl / gIvFrames),
+           (long)(gStatMT / gIvFrames), (long)(gStatTnl / gIvFrames), (long)(gStatVB / gIvFrames),
+           (long)(gStatVBv / gIvFrames), gHwVbWaits,
            gStatDE / gIvFrames, gStatDEslow / gIvFrames,
            ms100(gTVerts, perMs, gIvFrames) / 100, ms100(gTVerts, perMs, gIvFrames) % 100,
            gStatClip / gIvFrames, ms100(gTClip, perMs, gIvFrames) / 100, ms100(gTClip, perMs, gIvFrames) % 100,
@@ -3172,6 +3243,7 @@ void gl_frame_stats(void)
         gTGL = 0;
         gTFinish = gFinishN = 0;
         gNPos = gNAttr = gNFastTri = 0;
-        gStatMT = gStatTnl = 0;
+        gStatMT = gStatTnl = gStatVB = gStatVBv = 0;
+        gHwVbWaits = 0;
     }
 }

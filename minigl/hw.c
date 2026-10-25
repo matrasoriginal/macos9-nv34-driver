@@ -8,6 +8,7 @@
 #include "minigl.h"
 
 #define SUBC                7
+#define M_DMA_VTXBUF0       0x019c
 #define M_RT_HORIZ          0x0200
 #define M_TEX_UNITS_ENABLE  0x023c
 #define M_TEX_MATRIX_ENABLE 0x0240
@@ -27,7 +28,11 @@
 #define M_DEPTH_FUNC        0x0a6c
 #define M_DEPTH_WRITE       0x0a70
 #define M_FP_REG_CONTROL    0x1450
+#define M_VTXBUF0           0x1680
+#define M_VTX_CACHE_INV     0x1710
 #define M_VTXFMT            0x1740
+#define M_VB_ELEMENT_U16    0x1800
+#define M_VB_ELEMENT_U32    0x1804
 #define M_VERTEX_BEGIN_END  0x1808
 #define M_VERTEX_DATA       0x1818
 #define M_CULL_FACE         0x1830
@@ -235,6 +240,8 @@ int hw_bind(HwTarget *t)
     dataf(1); dataf(1); dataf(1); dataf(0);
     begin(M_FP_ACTIVE_PROGRAM, 1);
     data(S->g->fpOffset | 1);
+    begin(M_DMA_VTXBUF0, 1);                        /* q3-18: vrcholy vo VRAM (VTXBUF bez bitu 31) */
+    data(NV3D_HANDLE_VRAM);
     begin(M_FP_CONTROL, 1);
     data(0);
     begin(M_FP_REG_CONTROL, 1);
@@ -390,15 +397,20 @@ static void mat_upload(NVU32 mthd, const float *m)
         dataf(m ? (gTnlT ? m[(i & 3) * 4 + (i >> 2)] : m[i]) : ((i % 5) == 0 ? 1.0f : 0.0f));
 }
 
-static void tnl_state(const HwState *st)
+static void tnl_args(void)
 {
-    long key;
     if (gTnlT < 0) {
         gTnlT = gl_boot_arg("nv34gltnlt");
         gTnlClamp = gl_boot_arg("nv34gltnlclamp");
         gTnlCw = gl_boot_arg("nv34gltnlcw");
         gTnl4 = gl_boot_arg("nv34gltnl4");
     }
+}
+
+static void tnl_state(const HwState *st)
+{
+    long key;
+    tnl_args();
     if (hwTnl != st->tnl) {
         if (hwTnl < 0)
             mat_upload(M_MODELVIEW0, 0);
@@ -637,6 +649,175 @@ void hw_draw(int prim, const HwVtx *v, int n, int textured)
         }
         S->a->dmaCurrent += cnt * wpv;
         left -= cnt;
+    }
+    begin(M_VERTEX_BEGIN_END, 1);
+    data(0);
+}
+
+/* ---- q3-18: vrcholy vo VRAM + indexy ------------------------------------------
+ * Kruhový buffer 2 MB v 16 úsekoch; úsek nesie číslo snímky, ktorá ho naposledy použila, a znova
+ * sa doň píše, až keď ho GPU dokončil (REF_CNT = snímka). Do úseku, v ktorom sa práve píše, sa
+ * pokračuje bez kontroly; keby sa kruh pretočil v rámci jednej snímky, počká sa na celé GPU.
+ * Vrchol má rovnaký formát ako kratší inline vrchol T&L (q3-17). Indexy idú do push buffra
+ * (VB_ELEMENT_U16, prvý index v dolnej polovici slova ako v nouveau).
+ * boot-args nv34glnovb = vypnuté, nv34glvbswap = vrchol v poradí bajtov LE, nv34glidxhi = prvý
+ * index v hornej polovici slova. */
+#define VB_SIZE     (2u << 20)
+#define VB_SEGS     16
+#define VB_SEG      (VB_SIZE / VB_SEGS)
+static NVU32 gVbOff, gVbPos, gVbStart, gVbGen, gVbSegFrame[VB_SEGS];
+static int gVbOn = -1, gVbSwap, gIdxHi, gVbCurSeg = -1;
+NVU32 gHwVbWaits;
+
+static NVU32 bswap(NVU32 v)
+{
+    return (v >> 24) | ((v >> 8) & 0xff00) | ((v << 8) & 0xff0000) | (v << 24);
+}
+
+int hw_vb_ready(void)
+{
+    if (gVbOn < 0) {
+        gVbOn = !gl_boot_arg("nv34glnovb");
+        gVbSwap = gl_boot_arg("nv34glvbswap");
+        gIdxHi = gl_boot_arg("nv34glidxhi");
+    }
+    vtx_init();
+    tnl_args();
+    if (!gVbOn || gRefOK != 1 || gTnl4 || gVtx12 || gHwDead)   /* len kratší formát T&L */
+        return 0;
+    if (gVbOff && gVbGen != S->generation)          /* 3D znova inicializované: buffer zabudnúť */
+        gVbOff = 0;
+    if (!gVbOff) {
+        gVbOff = S->vramAlloc(VB_SIZE, 256);
+        if (!gVbOff) {
+            lg("vrcholy vo VRAM: nie je miesto (%u KB)", VB_SIZE >> 10);
+            gVbOn = 0;
+            return 0;
+        }
+        memset(gVbSegFrame, 0, sizeof(gVbSegFrame));
+        gVbPos = 0;
+        gVbCurSeg = -1;
+        gVbGen = S->generation;
+        if (first_time(0x72000000))
+            lg("vrcholy vo VRAM: %u KB na %x", VB_SIZE >> 10, gVbOff);
+    }
+    return 1;
+}
+
+void hw_vb_free(void)
+{
+    if (gVbOff && S) {
+        hw_sync();
+        S->vramFree(gVbOff);
+    }
+    gVbOff = 0;
+}
+
+volatile NVU32 *hw_vb_begin(NVU32 bytes)
+{
+    NVU32 sg, last;
+    if (bytes > VB_SIZE / 2)
+        return 0;
+    if (gVbPos + bytes > VB_SIZE) {
+        gVbPos = 0;
+        gVbCurSeg = -1;
+    }
+    last = (gVbPos + bytes - 1) / VB_SEG;
+    for (sg = gVbPos / VB_SEG; sg <= last; sg++) {
+        NVU32 f = gVbSegFrame[sg];
+        if ((int)sg == gVbCurSeg)
+            continue;
+        if (f && f > gpu_done()) {
+            gHwVbWaits++;
+            if (f >= gFrame) {
+                hw_sync();                          /* kruh pretočený v jednej snímke */
+            } else {
+                NVU32 t0 = TickCount(), w0 = tb();
+                nva_kickoff(S->a);
+                while (gpu_done() < f)
+                    if (TickCount() - t0 > 120) {
+                        hw_sync();
+                        break;
+                    }
+                gTWait += tb() - w0;
+            }
+        }
+        gVbSegFrame[sg] = gFrame;
+    }
+    gVbCurSeg = (int)last;
+    gVbStart = gVbPos;
+    return (volatile NVU32 *)(S->g->a->vram + gVbOff + gVbPos);
+}
+
+NVU32 hw_vb_end(NVU32 used)
+{
+    gVbPos = gVbStart + ((used + 63) & ~63u);
+    return gVbOff + gVbStart;
+}
+
+/* jeden vrchol do VRAM: x, y, z, farba, s, t (s1, t1) */
+void hw_vb_put(volatile NVU32 *d, const HwVtx *v, int textured)
+{
+    union { float f; NVU32 u; } a[7];
+    int i, n;
+    a[0].f = v->x; a[1].f = v->y; a[2].f = v->z;
+    a[3].f = v->sq; a[4].f = v->tq; a[5].f = v->sq1; a[6].f = v->tq1;
+    n = textured == 2 ? 4 : textured ? 2 : 0;
+    if (gVbSwap) {
+        d[0] = bswap(a[0].u); d[1] = bswap(a[1].u); d[2] = bswap(a[2].u);
+        d[3] = v->c;
+        for (i = 0; i < n; i++)
+            d[4 + i] = bswap(a[3 + i].u);
+    } else {
+        d[0] = a[0].u; d[1] = a[1].u; d[2] = a[2].u;
+        d[3] = vcolor(v);
+        for (i = 0; i < n; i++)
+            d[4 + i] = a[3 + i].u;
+    }
+}
+
+void hw_draw_indexed(int prim, NVU32 vbOff, int textured, const NVU16 *idx, int n)
+{
+    if (n <= 0 || gHwDead)
+        return;
+    set_vtxfmt(textured);
+    begin(M_VTXBUF0, 1);
+    data(vbOff);
+    begin(M_VTXBUF0 + 3 * 4, 1);
+    data(vbOff + 12);
+    if (textured) {
+        begin(M_VTXBUF0 + 8 * 4, textured == 2 ? 2 : 1);
+        data(vbOff + 16);
+        if (textured == 2)
+            data(vbOff + 24);
+    }
+    begin(M_VTX_CACHE_INV, 1);
+    data(0);
+    begin(M_VERTEX_BEGIN_END, 1);
+    data(prim);
+    if (n & 1) {
+        begin(M_VB_ELEMENT_U32, 1);
+        data(*idx++);
+        n--;
+    }
+    while (n) {
+        volatile NVU32 *p;
+        NVU32 cnt = n / 2, i;
+        if (cnt > 2047)
+            cnt = 2047;
+        if (nva_begin(S->a, SUBC, 0x40000000 | M_VB_ELEMENT_U16, cnt) != kNVAOK) {
+            hw_fail("indexy");
+            return;
+        }
+        p = S->a->dmaBase + S->a->dmaCurrent;
+        if (gIdxHi)
+            for (i = 0; i < cnt; i++, idx += 2)
+                p[i] = ((NVU32)idx[0] << 16) | idx[1];
+        else
+            for (i = 0; i < cnt; i++, idx += 2)
+                p[i] = ((NVU32)idx[1] << 16) | idx[0];
+        S->a->dmaCurrent += cnt;
+        n -= cnt * 2;
     }
     begin(M_VERTEX_BEGIN_END, 1);
     data(0);

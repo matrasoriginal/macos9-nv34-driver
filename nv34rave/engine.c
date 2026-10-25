@@ -696,6 +696,12 @@ static float zclamp(float z)
  * U8 × 4 v jednom slove (R v najvyššom bajte) → 8 slov s textúrou (predtým 12), 4 bez nej (8).
  * boot-args nv34ravelong = pôvodný 12/8-slovný vrchol. */
 static int gImmediate, gLong, gStats;
+
+/* rave-26: čas v kresliacich metódach a vo výmene snímky (timebase), boot-args nv34ravestats */
+static inline NVU32 tb(void) { NVU32 v; __asm__ volatile("mftb %0" : "=r"(v)); return v; }
+static NVU32 gTDraw, gTPresent, gDrawCalls;
+static void td_end(NVU32 *t0) { gTDraw += tb() - *t0; }
+#define TD() NVU32 tdT0 __attribute__((cleanup(td_end))) = tb(); gDrawCalls++
 static NVU32 gVwLeft, gVwHdr, gVwWords, gVwBad;
 static NVU32 gVwDummy[12];
 
@@ -1142,6 +1148,7 @@ static int flat_g(const TQAVGouraud *v, unsigned long n)
 
 static void DrawPoint(const TQADrawContext *dc, const TQAVGouraud *v)
 {
+    TD();
     tr_vg("Point", CTX(dc), 1, 0, v);
     if (first_time(0x13000000 | 1))
         lg("prvy DrawPoint");
@@ -1156,6 +1163,7 @@ static void DrawPoint(const TQADrawContext *dc, const TQAVGouraud *v)
 
 static void DrawLine(const TQADrawContext *dc, const TQAVGouraud *v0, const TQAVGouraud *v1)
 {
+    TD();
     tr_vg("Line", CTX(dc), 2, 0, v0);
     if (first_time(0x13000000 | 2))
         lg("prvy DrawLine");
@@ -1172,6 +1180,7 @@ static void DrawLine(const TQADrawContext *dc, const TQAVGouraud *v0, const TQAV
 static void DrawTriGouraud(const TQADrawContext *dc, const TQAVGouraud *v0, const TQAVGouraud *v1,
                            const TQAVGouraud *v2, unsigned long flags)
 {
+    TD();
     CTX(dc)->flat2D = v0->z <= 0.0f && v1->z <= 0.0f && v2->z <= 0.0f;
     tr_vg("TriG", CTX(dc), 1, 3, v0);
     if (first_time(0x13000000 | 3))
@@ -1192,6 +1201,7 @@ static void DrawTriGouraud(const TQADrawContext *dc, const TQAVGouraud *v0, cons
 static void DrawTriTexture(const TQADrawContext *dc, const TQAVTexture *v0, const TQAVTexture *v1,
                            const TQAVTexture *v2, unsigned long flags)
 {
+    TD();
     CTX(dc)->flat2D = v0->z <= 0.0f && v1->z <= 0.0f && v2->z <= 0.0f &&
                       v0->invW == 1.0f && v1->invW == 1.0f && v2->invW == 1.0f;
     tr_vt("TriT", CTX(dc), 1, 3, v0);
@@ -1213,6 +1223,7 @@ static void DrawTriTexture(const TQADrawContext *dc, const TQAVTexture *v0, cons
 static void DrawVGouraud(const TQADrawContext *dc, unsigned long n, long mode, const TQAVGouraud v[],
                          const unsigned long flags[])
 {
+    TD();
     CTX(dc)->flat2D = flat_g(v, n);
     if (n) tr_vg("VG", CTX(dc), n, mode, &v[0]);
     if (first_time(0x13000000 | 5))
@@ -1233,6 +1244,7 @@ static void DrawVGouraud(const TQADrawContext *dc, unsigned long n, long mode, c
 static void DrawVTexture(const TQADrawContext *dc, unsigned long n, long mode, const TQAVTexture v[],
                          const unsigned long flags[])
 {
+    TD();
     CTX(dc)->flat2D = flat_t(v, n);
     if (n) tr_vt("VT", CTX(dc), n, mode, &v[0]);
     if (first_time(0x13000000 | 6))
@@ -1264,6 +1276,7 @@ static void SubmitVerticesTexture(const TQADrawContext *dc, unsigned long n, con
 
 static void DrawTriMeshGouraud(const TQADrawContext *dc, unsigned long n, const TQAIndexedTriangle *t)
 {
+    TD();
     CTX(dc)->flat2D = 0;
     TR("MeshG n %u nv %u", n, CTX(dc)->nvg);
     if (first_time(0x13000000 | 7))
@@ -1283,6 +1296,7 @@ static void DrawTriMeshGouraud(const TQADrawContext *dc, unsigned long n, const 
 
 static void DrawTriMeshTexture(const TQADrawContext *dc, unsigned long n, const TQAIndexedTriangle *t)
 {
+    TD();
     CTX(dc)->flat2D = 0;
     if (CTX(dc)->vt && CTX(dc)->nvt) tr_vt("MeshT", CTX(dc), n, 0, &CTX(dc)->vt[0]);
     if (first_time(0x13000000 | 8))
@@ -1303,6 +1317,7 @@ static void DrawTriMeshTexture(const TQADrawContext *dc, unsigned long n, const 
 /* bitmapa = obdĺžnik s RECT textúrou, ľavý horný roh vo v->x, v->y */
 static void DrawBitmap(const TQADrawContext *dc, const TQAVGouraud *v, TQABitmap *bitmap)
 {
+    TD();
     tr_vg("Bitmap", CTX(dc), 1, 0, v);
     if (first_time(0x13000000 | 9))
         lg("prvy DrawBitmap");
@@ -1572,27 +1587,36 @@ static TQAError RenderEnd(const TQADrawContext *dc, const TQARect *modified)
 
     if (!S || S->state3D != 1)
         return kQAError;
+    NVU32 tp = tb();
     if (c->dbl && !c->si[kQATag_DontSwap])
         present(c, modified);
     else
         kick();
+    gTPresent += tb() - tp;
     c->frames++;
     gFrame++;
-    if (gStats) {                                   /* rave-25: boot-args nv34ravestats */
-        static unsigned long t0;
-        static NVU32 f0, tr0;
-        unsigned long t = TickCount();
+    if (gStats) {                                   /* rave-25/26: boot-args nv34ravestats */
+        static NVU32 t0, f0, tr0;
+        NVU32 t = tb(), nf = c->frames - f0;
         if (!t0) {
             t0 = t;
             f0 = c->frames;
             tr0 = c->tris;
-        } else if (c->frames - f0 >= 250 && t > t0) {
-            unsigned long fps10 = (unsigned long)((c->frames - f0) * 600UL / (t - t0));
-            lg("snimky %u: %lu.%lu fps, %u troj./snimku (vrchol %u slov)", c->frames, fps10 / 10, fps10 % 10,
-               (c->tris - tr0) / (c->frames - f0), WPV_T);
+            gTDraw = gTPresent = gDrawCalls = 0;
+        } else if (nf >= 250) {
+            NVU32 dt = t - t0, tpm = 18432;          /* timebase 18,432 MHz (PowerBook6,2) */
+            NVU32 fps10 = (NVU32)((double)nf * tpm * 10000.0 / dt);
+            NVU32 msF = (NVU32)((double)dt * 100.0 / tpm / nf);
+            NVU32 msD = (NVU32)((double)gTDraw * 100.0 / tpm / nf);
+            NVU32 msP = (NVU32)((double)gTPresent * 100.0 / tpm / nf);
+            lg("snimky %u: %u.%u fps, ms/snimku: celkom %u.%u, kreslenie RAVE %u.%u, vymena %u.%u; "
+               "%u volani, %u prim./snimku (vrchol %u slov)",
+               c->frames, fps10 / 10, fps10 % 10, msF / 100, msF % 100, msD / 100, msD % 100, msP / 100, msP % 100,
+               gDrawCalls / nf, (c->tris - tr0) / nf, WPV_T);
             t0 = t;
             f0 = c->frames;
             tr0 = c->tris;
+            gTDraw = gTPresent = gDrawCalls = 0;
         }
     }
     if (done.standardNoticeMethod) {

@@ -74,6 +74,7 @@ static long hwMode = -1, hwBlend = -1, hwAlpha = -1, hwDepth = -1, hwMask = -1, 
 static long hwTex = -1, hwTexKey = -1, hwTexEpoch = -1;
 static long hwTex1 = -1, hwTex1Key = -1, hwTex1Epoch = -1;
 static long hwTnl = -1, hwMatGen = -1, hwCull = -1;
+static int gVtx12 = -1, gColorBE, gCompact;        /* formát vrcholu (opt-5, q3-17) */
 
 static void invalidate(void)
 {
@@ -263,8 +264,6 @@ int hw_bind(HwTarget *t)
  * 8 slov na vrchol s textúrou (predtým 12), 4 bez nej (predtým 8). boot-args nv34glvtx12 =
  * pôvodný formát. Farba R<<24|G<<16|B<<8|A (opt-6 s opačným poradím mala ružový nádych);
  * nv34glcolorle = opačné poradie. */
-static int gVtx12 = -1, gColorBE;
-
 static void vtx_init(void)
 {
     if (gVtx12 < 0) {
@@ -275,14 +274,21 @@ static void vtx_init(void)
 
 static void set_vtxfmt(int tex)
 {
-    int i;
-    if (hwFmt == tex)
+    int i, key = tex | (gCompact << 4);
+    if (hwFmt == key)
         return;
     begin(M_VTXFMT, 16);
     if (gVtx12) {
         NVU32 f = 0x2 | (4u << 4) | ((tex ? 48u : 32u) << 8);
         for (i = 0; i < 16; i++)
             data(i == 0 || i == 3 || (i == 8 && tex) ? f : 0x2);
+    } else if (gCompact) {
+        NVU32 st = (tex == 2 ? 32u : tex ? 24u : 16u) << 8;   /* q3-17: s, t */
+        for (i = 0; i < 16; i++)
+            data(i == 0 ? (0x2 | (3u << 4) | st) :
+                 i == 3 ? (0x4 | (4u << 4) | st) :
+                 (i == 8 && tex) ? (0x2 | (2u << 4) | st) :
+                 (i == 9 && tex == 2) ? (0x2 | (2u << 4) | st) : 0x2);
     } else {
         NVU32 st = (tex == 2 ? 48u : tex ? 32u : 16u) << 8;   /* q3-12: 2 textúry = 12 slov */
         for (i = 0; i < 16; i++)
@@ -291,7 +297,7 @@ static void set_vtxfmt(int tex)
                  (i == 8 && tex) ? (0x2 | (4u << 4) | st) :
                  (i == 9 && tex == 2) ? (0x2 | (4u << 4) | st) : 0x2);
     }
-    hwFmt = tex;
+    hwFmt = key;
 }
 
 static NVU32 tex_filter(GLenum minFilter, GLenum magFilter, const HwTex *t)
@@ -371,8 +377,10 @@ static void tex_unit(int u, HwTex *x, GLenum minF, GLenum magF, GLenum ws, GLenu
  * v nouveau: zložená matica), MODELVIEW ostáva jednotková; viewport (posun 0, mierka 1) je
  * v matici. Bez T&L jednotková matica (vrcholy v súradniciach okna, w = 1).
  * boot-args nv34gltnlt = matica transponovaná, nv34gltnlclamp = hĺbku obmedziť (bez orezania
- * blízkou/ďalekou rovinou), nv34gltnlccw = smer prednej steny bez otočenia. */
-static int gTnlT = -1, gTnlClamp, gTnlCcw;
+ * blízkou/ďalekou rovinou), nv34gltnlcw = predná strana otočená (q3-16 predvolené, zlé).
+ * q3-17: v T&L dávke textúrové súradnice len s, t (q = 1 doplní GPU) → 6 slov na vrchol
+ * (s dvoma textúrami 8); boot-args nv34gltnl4 = 4 floaty ako bez T&L. */
+static int gTnlT = -1, gTnlClamp, gTnlCw, gTnl4;
 
 static void mat_upload(NVU32 mthd, const float *m)
 {
@@ -388,7 +396,8 @@ static void tnl_state(const HwState *st)
     if (gTnlT < 0) {
         gTnlT = gl_boot_arg("nv34gltnlt");
         gTnlClamp = gl_boot_arg("nv34gltnlclamp");
-        gTnlCcw = gl_boot_arg("nv34gltnlccw");
+        gTnlCw = gl_boot_arg("nv34gltnlcw");
+        gTnl4 = gl_boot_arg("nv34gltnl4");
     }
     if (hwTnl != st->tnl) {
         if (hwTnl < 0)
@@ -400,18 +409,20 @@ static void tnl_state(const HwState *st)
             hwMatGen = -1;
         }
         hwTnl = st->tnl;
+        gCompact = st->tnl && !gTnl4 && !gVtx12;
     }
     if (st->tnl && hwMatGen != (long)st->matGen) {
         mat_upload(M_PROJECTION0, st->mat);
         hwMatGen = st->matGen;
     }
-    /* odvrátené steny: bez T&L ich odstráni CPU. Okno má y dole → predná strana otočená */
+    /* odvrátené steny: bez T&L ich odstráni CPU. GPU berie FRONT_FACE podľa GL (q3-16: s otočením
+     * kvôli y dole zmizlo všetko) */
     key = st->tnl && st->cull ? (long)((st->cullFace << 16) | st->frontFace) : 0;
     if (hwCull != key) {
         if (key) {
             begin(M_CULL_FACE, 2);
             data(st->cullFace);
-            data(gTnlCcw ? st->frontFace : st->frontFace == GL_CCW ? GL_CW : GL_CCW);
+            data(!gTnlCw ? st->frontFace : st->frontFace == GL_CCW ? GL_CW : GL_CCW);
         }
         begin(M_CULL_FACE_ENABLE, 1);
         data(key != 0);
@@ -561,7 +572,8 @@ void hw_draw(int prim, const HwVtx *v, int n, int textured)
     if (n <= 0)
         return;
     vtx_init();
-    wpv = gVtx12 ? (textured ? 12 : 8) : (textured == 2 ? 12 : textured ? 8 : 4);
+    wpv = gVtx12 ? (textured ? 12 : 8) : gCompact ? (textured == 2 ? 8 : textured ? 6 : 4) :
+          (textured == 2 ? 12 : textured ? 8 : 4);
     set_vtxfmt(textured);
     begin(M_VERTEX_BEGIN_END, 1);
     data(prim);
@@ -590,6 +602,18 @@ void hw_draw(int prim, const HwVtx *v, int n, int textured)
                     p += 12;
                 } else {
                     p += 8;
+                }
+            }
+        } else if (gCompact && textured) {
+            for (i = 0; i < cnt; i++, v++) {
+                p[0] = v->x; p[1] = v->y; p[2] = v->z;
+                ((volatile NVU32 *)p)[3] = vcolor(v);
+                p[4] = v->sq; p[5] = v->tq;
+                if (textured == 2) {
+                    p[6] = v->sq1; p[7] = v->tq1;
+                    p += 8;
+                } else {
+                    p += 6;
                 }
             }
         } else if (textured == 2) {

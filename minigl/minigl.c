@@ -95,7 +95,7 @@ static float gGuard = 1.01f;                /* ochranný pás orezávania (wolf-
 static int gTexDbg, gTexDbgN;               /* q3-1: boot-args nv34gltex */
 static int gStatsOn;                /* boot-args nv34glstats: časy každých 250 snímok do logu */
 static int gMT = 1;                 /* q3-12: GL_ARB_multitexture (boot-args nv34glnomt = vypnuté) */
-static int gTnl;                    /* q3-16: HW T&L v glDrawElements (boot-args nv34gltnl) */
+static int gTnl;                    /* q3-16: HW T&L v glDrawElements (q3-17 predvolené, nv34glnotnl = vypnuté) */
 
 static int boot_arg(const char *word)
 {
@@ -133,7 +133,7 @@ void gl_stats_init(void)
     if (boot_arg("nv34glguard4"))
         gGuard = 4.0f;
     gMT = !boot_arg("nv34glnomt");
-    gTnl = boot_arg("nv34gltnl");
+    gTnl = !boot_arg("nv34glnotnl");
 }
 
 NV34Shared *shared(void)

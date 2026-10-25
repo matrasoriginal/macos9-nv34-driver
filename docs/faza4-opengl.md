@@ -637,3 +637,9 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
   0x01), odvrátené steny GPU (CULL_FACE 0x1830, FRONT_FACE 0x1834, predná strana otočená kvôli
   y dole). S polygon offsetom ostáva cesta na CPU. Varianty: `nv34gltnlt` (transponovaná matica),
   `nv34gltnlclamp` (DEPTH_CONTROL 0x10), `nv34gltnlccw` (FRONT_FACE bez otočenia).
+- q3-16 výsledok: obraz správny až s `nv34gltnlccw` — GPU berie FRONT_FACE podľa GL aj pri
+  y dole v matici. Timedemo **54 fps** (z 50). Na GPU ide ~4000 troj./snímku (predtým CPU
+  odstránil odvrátené ~polovicu), dávky do push buffra 1–2 ms. V menu GPU úzke miesto (glFinish 4 ms).
+- q3-17: T&L predvolene zapnuté (`nv34glnotnl` = vypnuté), FRONT_FACE bez otočenia
+  (`nv34gltnlcw` = otočené). V T&L dávke textúrové súradnice len s, t → 6 slov na vrchol
+  (s dvoma textúrami 8 namiesto 12); `nv34gltnl4` = 4 floaty.

@@ -116,7 +116,7 @@ static UInt32 cpu_mhz_min(void)
         if ((t = loop_tb_n(1, 5000)) < b)
             b = t;
     }
-    return b > a ? (UInt32)(8.0 * 5000 * gTbFreq / (b - a)) : 0;
+    return b > a ? (UInt32)(8.0 * 5000 * gTbFreq / 1e6 / (b - a)) : 0;
 }
 
 static volatile UInt8 *gFreq, *gVolt, *gSlew;
@@ -284,7 +284,7 @@ int main(void)
     unsigned long secs;
     gLog = fopen("NV34 CPU.txt", "a");
     GetDateTime(&secs);
-    out("\n==== NV34 CPU 3 — %lu s od 1904, %lu s od startu (Option = znizeny takt)\n", secs,
+    out("\n==== NV34 CPU 4 — %lu s od 1904, %lu s od startu (Option = znizeny takt)\n", secs,
         TickCount() / 60);
     run();
     if (gLog)

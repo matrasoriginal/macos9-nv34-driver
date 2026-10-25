@@ -681,4 +681,14 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
   (vrátane čakania na GPU) a výmena ~0,1 ms; 160–980 volaní a 600–3500 primitív na snímku.
   UT počíta transformáciu, osvetlenie a viditeľnosť sám na CPU → RAVE tvorí ~3–6 % snímky,
   ďalšia optimalizácia RAVE nemá zmysel.
+- cpu-1 (NV34 Info): `bus-frequencies` 133,12 / 102 MHz, `processor-to-bus-ratio*2` 15 (×7,5),
+  `frequency-gpio` (mac-io+0x6a) = 0x04 a `voltage-gpio` (+0x6b) = 0x04 → nízka zbernica, 765 MHz.
+  `recalced-clock-frequency` 995,3 MHz — firmware pri štarte bežal na plnom takte. Ventilátor ADT7460.
+- cpu-2 (NV34 CPU, ako Linux gpios_set_cpu_speed: napätie 0x05, 10 ms, frekvencia 0x05, čakať na
+  `slewing-done`): GPIO 07/07, slewing-done po 4,5 ms, procesor ~905 MHz. Wolfenstein ~25 fps (z ~22).
+- cpu-3/4: timebase stála (18,432 MHz podľa TickCount), takt bez prerušení 904,6 MHz (prerušenia
+  ~1 %), čítanie RAM 215 → ~260 MB/s → zbernica ~120,6 MHz, nie 133. Hodiny robí CY28512
+  (`i2c-hwclock` na I2C uni-n, adresa 0xd2, `platform-do-set-values`/`clockspreading`; Linux
+  pmac_tweak_clock_spreading mení jeho registre pre „AlBook 12" rev 2“) — horná predvoľba čipu
+  je zrejme ~120 MHz; 133 MHz by chcelo zápis do registrov čipu cez I2C (neskúšané).
 

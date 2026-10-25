@@ -12,6 +12,7 @@ Ovládače a 3D pre **GeForce FX Go5200 (NV34)** v **PowerBooku G4 12" (PowerBoo
 | Do Extensions | **NV34 RAVE** 1.1 | QuickDraw 3D RAVE engine (Unreal Tournament) | `Systémová zložka:Extensions` |
 | Do priecinka hry | **OpenGLLibrary** (NV34 MiniGL 1.0) | vlastné OpenGL 1.1 + AGL na GPU | **do priečinka hry** vedľa aplikácie, nie do Extensions |
 | Nastroje | NV34 Info, NV34 GL Check, NV34 DSp Test, NV34 RAVE Test | diagnostika | kamkoľvek |
+| Nastroje | **NV34 CPU** | vyšší takt procesora (765 → ~905 MHz) | kamkoľvek alebo `Startup Items` |
 | | Citaj ma | tento návod bez diakritiky | |
 
 Prenos: `.dsk` (Disk Copy) alebo `.bin` (StuffIt Expander). FAT kľúč, FTP či e-mail zahodia
@@ -41,8 +42,12 @@ Bez `OpenGLLibrary` v priečinku hra použije Apple OpenGL (softvérové, pomal�
 MiniGL podporuje dve textúry naraz (GL_ARB_multitexture) a v `glDrawElements` hardvérovú
 transformáciu (T&L) — polohy vrcholov, orezanie a odvrátené steny počíta GPU.
 
-Procesor PowerBooku 6,2 beží pod Mac OS 9 na ~750 MHz namiesto 1 GHz (PMU ho neprepne
-na plnú rýchlosť, Mac OS 9 o tom nevie). Hry s náročnou logikou (Wolfenstein) brzdí CPU.
+Procesor PowerBooku 6,2 beží pod Mac OS 9 na ~765 MHz namiesto 1 GHz: zbernica ostáva na 102 MHz
+(Mac OS 9 na tomto modeli rýchlosť neprepína). Hry s náročnou logikou (Wolfenstein) brzdí CPU.
+**NV34 CPU** prepne zbernicu na vyššiu rýchlosť (GPIO KeyLargo ako Linux): procesor ~905 MHz,
+čítanie RAM +22 %, Wolfenstein ~22 → ~25 fps. Spustiť po každom štarte (alebo dať do `Startup
+Items`) a po prebudení zo spánku; s podržaným Option prepne späť. Log `NV34 CPU.txt` vedľa
+programu. Viac tepla a vyššia spotreba, ventilátor sa riadi sám.
 
 ## Známe obmedzenia
 

@@ -645,3 +645,8 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
   (s dvoma textúrami 8 namiesto 12); `nv34gltnl4` = 4 floaty.
 - q3-17 výsledok: Quake III timedemo **55,8 fps**, textúry s 2 floatmi v poriadku. Wolfenstein
   v náročnej scéne ~20 fps: snímka 51 ms, MiniGL 12 ms (~9400 troj.), zvyšok hra na CPU.
+- wolf-6/7: Wolfenstein sa na počet jednotiek (0x84E2) vôbec nepýta — `/gfxinfo` ukazuje
+  GL_MAX_ACTIVE_TEXTURES_ARB 0 len zo svojej premennej. Multitextúru používa: s nastavením
+  „fast“ (po vid_restart) ~5000 z ~17 000 troj./snímku s 2 textúrami; s predvoleným „high“ (nastavenie
+  sa neukladá) 0. Počet trojuholníkov je v oboch prípadoch rovnaký (~17 000), fps rovnaké (~15–16):
+  snímka ~65 ms, MiniGL ~21 ms (glEnd ~15, dávky ~5,5), zvyšok hra. Ďalší zisk len z prípravy vrcholov.

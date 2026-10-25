@@ -33,7 +33,7 @@ používajú ďalej; naša knižnica platí iba pre hru, v ktorej priečinku le�
 | **Unreal Tournament** | NV34 RAVE | v štartovacom dialógu zvoliť RAVE | 30–50 fps |
 | **Quake II** | MiniGL | `OpenGLLibrary` do priečinka hry, ovládač OpenGL | timedemo 53–54 fps |
 | **Half-Life** (Xash3D, SDL „macosclassic“) | MiniGL | `OpenGLLibrary` do priečinka hry; `valve:video.cfg` celá obrazovka **len v 1024×768** | 25–75 fps |
-| **Quake III** (MacQuake3 1.1x) | MiniGL | `OpenGLLibrary` do priečinka hry; dáta zhodné s verziou aplikácie (pre 1.1x iba `pak0.pk3`); v Get Info viac pamäte | timedemo 55–56 fps |
+| **Quake III** (MacQuake3 1.1x) | MiniGL | `OpenGLLibrary` do priečinka hry; dáta zhodné s verziou aplikácie (pre 1.1x iba `pak0.pk3`); v Get Info viac pamäte | timedemo 61 fps |
 | **Return to Castle Wolfenstein** | MiniGL | `OpenGLLibrary` do priečinka hry; v Get Info aspoň 256 MB pamäte | 15–90 fps (náročné scény ~20 fps, brzdí CPU) |
 
 Bez `OpenGLLibrary` v priečinku hra použije Apple OpenGL (softvérové, pomalé).

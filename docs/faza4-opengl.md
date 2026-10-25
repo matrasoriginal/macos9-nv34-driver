@@ -660,3 +660,6 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
 - q3-20: predvolene inline vrcholy T&L priamo z gLV podľa indexov volania (bez kópie 3 HwVtx na
   trojuholník do dávky; jedno kreslenie na glDrawElements). Vertex buffer len `nv34glvb`,
   `nv34glvbbatch` = VB_VERTEX_BATCH (0x1814) bez indexov — či GPU vôbec číta vrcholy z VRAM.
+- q3-20 výsledok: **Quake III timedemo 61,3 fps** (z 55,8). Wolfenstein v náročnej scéne ~22 fps:
+  snímka ~45 ms, ~12 000 troj., MiniGL ~9,5 ms (glEnd ~5,5, z toho zápis do push buffra vo VRAM
+  ~3,7 ms ≈ 270 MB/s), hra ~35 ms na CPU (750 MHz).

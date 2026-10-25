@@ -626,3 +626,8 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
   cez PMU). Procesor teda beží na zníženom takte.
 - q3-15: Power Manager (PowerMgrLib) — log rýchlostí; boot-args `nv34cpufull` / `nv34cputoggle`
   skúsia SetProcessorSpeed a takt znova zmerajú.
+- q3-15 výsledok: Power Manager hlási aktuálna = max = min = 1000 MHz, plná rýchlosť, cycling 0.
+  SetProcessorSpeed(true) vráti 0, (false)/(true) vrátia 1, zmeraný takt ostáva ~750 MHz (692–767).
+  Mac OS 9 o zníženom takte nevie, cez Power Manager sa preto nedá zmeniť. Skutočné prepnutie robí PMU
+  príkaz 0x7d s resetom CPU (ako uspanie, Linux pmu_set_speed), z knižnice hry to nie je bezpečné.
+  Ďalej: HW T&L, aby CPU robil menej.

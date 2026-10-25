@@ -31,6 +31,8 @@ apps:
 	cmake --build nv34glcheck/build
 	cmake -S nv34dsptest -B nv34dsptest/build $(TC) >/dev/null
 	cmake --build nv34dsptest/build
+	cmake -S nv34cpu -B nv34cpu/build $(TC) >/dev/null
+	cmake --build nv34cpu/build
 	$(MAKE) -C nv34qd
 	$(MAKE) -C nv34rave
 	VERS=1.1 VERS_INFO="NV34 RAVE engine (QuickDraw 3D RAVE)" NDRV_TYPE=shlb NDRV_CREATOR=tnsl tools/mkndrv.sh nv34rave/build/NV34RAVE.pef "NV34 RAVE" nv34rave/build >/dev/null
@@ -40,7 +42,7 @@ apps:
 	cp minigl/build/OpenGLLibrary.bin dist/OpenGLLibrary.bin
 	cp nv34info/build/NV34Info.bin nv34bench/build/NV34Bench.bin nv34accel/build/NV34Accel.bin \
 	   nv34gl/build/NV34GL.bin nv34ravetest/build/NV34RAVETest.bin nv34glcheck/build/NV34GLCheck.bin \
-	   nv34dsptest/build/NV34DSpTest.bin dist/
+	   nv34dsptest/build/NV34DSpTest.bin nv34cpu/build/NV34CPU.bin dist/
 	cp nv34qd/build/NV34QD-INIT.bin dist/NV34QD.bin
 
 dist/NV34\ test.dsk: driver apps
@@ -64,7 +66,7 @@ dist/NV34\ test.dsk: driver apps
 clean:
 	$(MAKE) -C driver clean
 	rm -rf nv34info/build nv34bench/build nv34accel/build nv34gl/build nv34ravetest/build nv34glcheck/build \
-	       nv34dsptest/build dist
+	       nv34dsptest/build nv34cpu/build dist
 	$(MAKE) -C nv34rave clean
 	$(MAKE) -C minigl clean
 	$(MAKE) -C nv34qd clean
@@ -91,6 +93,7 @@ release: driver apps
 	$(H)/hcopy -m dist/NV34GLCheck.bin "$(R):Nastroje:NV34 GL Check"
 	$(H)/hcopy -m dist/NV34DSpTest.bin "$(R):Nastroje:NV34 DSp Test"
 	$(H)/hcopy -m dist/NV34RAVETest.bin "$(R):Nastroje:NV34 RAVE Test"
+	$(H)/hcopy -m dist/NV34CPU.bin "$(R):Nastroje:NV34 CPU"
 	$(H)/hls -lR ":"
 	$(H)/humount >/dev/null
 

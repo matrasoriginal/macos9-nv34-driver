@@ -1609,9 +1609,10 @@ static TQAError RenderEnd(const TQADrawContext *dc, const TQARect *modified)
             NVU32 msF = (NVU32)((double)dt * 100.0 / tpm / nf);
             NVU32 msD = (NVU32)((double)gTDraw * 100.0 / tpm / nf);
             NVU32 msP = (NVU32)((double)gTPresent * 100.0 / tpm / nf);
-            lg("snimky %u: %u.%u fps, ms/snimku: celkom %u.%u, kreslenie RAVE %u.%u, vymena %u.%u; "
+            lg("snimky %u: %u.%u fps, ms/snimku: celkom %u.%u%u, kreslenie RAVE %u.%u%u, vymena %u.%u%u; "
                "%u volani, %u prim./snimku (vrchol %u slov)",
-               c->frames, fps10 / 10, fps10 % 10, msF / 100, msF % 100, msD / 100, msD % 100, msP / 100, msP % 100,
+               c->frames, fps10 / 10, fps10 % 10, msF / 100, msF / 10 % 10, msF % 10, msD / 100, msD / 10 % 10,
+               msD % 10, msP / 100, msP / 10 % 10, msP % 10,
                gDrawCalls / nf, (c->tris - tr0) / nf, WPV_T);
             t0 = t;
             f0 = c->frames;

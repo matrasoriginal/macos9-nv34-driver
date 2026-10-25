@@ -674,3 +674,11 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
 - wolf-9 výsledok: ORTHOGONAL_ABS (3) s režimom 0x804 (LINEAR_UNSIGNED) hmlu nedal, RADIAL (1)
   s 0x2601 (LINEAR_SIGNED) funguje → radiálna predvolene (wolf-10), `nv34glfogplane` = pokus
   s rovinou oka. Výkon bez zmeny (~24 fps v náročnej scéne s hmlou).
+- rave-25: NV34 RAVE ako MiniGL opt-1 a q3-17 — vrchol priamo do rezervovaného miesta v push buffri,
+  pozícia xyz + farba U8×4 → 8 slov s textúrou (12), 4 bez nej (8); `nv34ravelong` = pôvodný.
+  Výsledok: textúry OK, výkon UT rovnaký. UT multitextúru cez RAVE nezapína.
+- rave-26 (`nv34ravestats`): UT 29–52 fps, snímka 19–35 ms, z toho **kreslenie RAVE 0,3–1,9 ms**
+  (vrátane čakania na GPU) a výmena ~0,1 ms; 160–980 volaní a 600–3500 primitív na snímku.
+  UT počíta transformáciu, osvetlenie a viditeľnosť sám na CPU → RAVE tvorí ~3–6 % snímky,
+  ďalšia optimalizácia RAVE nemá zmysel.
+

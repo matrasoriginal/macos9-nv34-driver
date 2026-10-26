@@ -46,6 +46,15 @@ typedef struct HwTex {
     struct HwTex *next, *prev;
 } HwTex;
 
+/* max-4: prostredie textúrovej jednotky (glTexEnv, aj GL_COMBINE z ARB_texture_env_combine) */
+typedef struct HwEnvUnit {
+    GLenum  mode;                   /* GL_MODULATE, GL_REPLACE, GL_DECAL, GL_BLEND, GL_ADD, GL_COMBINE */
+    GLenum  comb[2];                /* COMBINE_RGB, COMBINE_ALPHA */
+    GLenum  src[2][3], op[2][3];    /* [0] RGB, [1] alfa: SOURCEn, OPERANDn */
+    float   scale[2];               /* RGB_SCALE, ALPHA_SCALE */
+    float   color[4];               /* GL_TEXTURE_ENV_COLOR */
+} HwEnvUnit;
+
 /* stav, ktorý GL nastaví pred kreslením */
 typedef struct HwState {
     int     blend;  GLenum blendSrc, blendDst;
@@ -68,6 +77,8 @@ typedef struct HwState {
      * MODELVIEW (po riadkoch) — len na vzdialenosť v priestore oka, polohu dáva stále mat (wolf-8) */
     int     fog; GLenum fogMode; float fogK[2]; NVU32 fogColor;
     const float *mv;
+    /* max-4: NULL = pevné combiners (textúry × primárna farba), inak fragment program podľa env[0..1] */
+    const HwEnvUnit *env;
 } HwState;
 
 int     hw_init(void);                                  /* 1 = GPU pripravené */
@@ -208,9 +219,7 @@ typedef struct GLCtx {
     /* q3-4: textúrová jednotka 1; q3-12: kreslí sa s ňou (GL_ARB_multitexture, len GL_MODULATE) */
     int     unit, cunit, tex2D1;
     TexObj *bound1;
-    GLenum  texEnv1;
-    /* max-2: GL_COMBINE (ARB_texture_env_combine) — režim, COMBINE_RGB a SOURCE0_RGB jednotky 0 a 1 */
-    GLenum  envMode0, comb0, src0, comb1;
+    HwEnvUnit env[2];               /* max-4: glTexEnv jednotiek 0 a 1 */
     Arr     ta1;
     float   curTex1[4];
     int     unpackAlign, unpackRowLength, packAlign;

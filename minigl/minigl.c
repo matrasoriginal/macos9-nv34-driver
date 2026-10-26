@@ -95,6 +95,7 @@ static float gGuard = 1.01f;                /* ochranný pás orezávania (wolf-
 static int gTexDbg, gTexDbgN;               /* q3-1: boot-args nv34gltex */
 static int gStatsOn;                /* boot-args nv34glstats: časy každých 250 snímok do logu */
 static int gMT = 1;                 /* q3-12: GL_ARB_multitexture (boot-args nv34glnomt = vypnuté) */
+static int gNoFpg;                  /* max-4: boot-args nv34glnofpg = texenv bez fragment programov */
 static int gTnl;                    /* q3-16: HW T&L v glDrawElements (q3-17 predvolené, nv34glnotnl = vypnuté) */
 
 static int boot_arg(const char *word)
@@ -134,6 +135,7 @@ void gl_stats_init(void)
         gGuard = 4.0f;
     gMT = !boot_arg("nv34glnomt");
     gTnl = !boot_arg("nv34glnotnl");
+    gNoFpg = boot_arg("nv34glnofpg");
 }
 
 NV34Shared *shared(void)
@@ -1198,61 +1200,99 @@ void glGetTexParameterfv(GLenum target, GLenum pname, GLfloat *v)
 }
 
 #define GL_COMBINE_ARB      0x8570
-#define GL_COMBINE_RGB_ARB  0x8571
-#define GL_SOURCE0_RGB_ARB  0x8580
 
-/* max-2: jednotka 0 — GL_COMBINE s REPLACE z textúry = GL_REPLACE, inak ako MODULATE */
-static GLenum env0_effective(void)
+/* max-4: glTexEnv jednotky C->unit do C->env[]: režim aj GL_COMBINE (COMBINE_RGB/ALPHA, SOURCE0–2,
+ * OPERAND0–2, RGB/ALPHA_SCALE, TEXTURE_ENV_COLOR). Kreslí fragment program (hw.c, fpg_*). */
+static void tex_env_v(GLenum target, GLenum pname, const GLfloat *f)
 {
-    if (C->envMode0 != GL_COMBINE_ARB)
-        return C->envMode0;
-    if (C->comb0 == GL_REPLACE && C->src0 == GL_TEXTURE)
-        return GL_REPLACE;
-    return GL_MODULATE;
+    HwEnvUnit n, *e;
+    GLint v = (GLint)f[0];
+    int k;
+    CHECK();
+    if (target != GL_TEXTURE_ENV || C->unit > 1) {
+        ONCE(0x55000000 | (pname & 0xffff), "glTexEnv %x %x = %x ignorovane", target, pname, v);
+        return;
+    }
+    n = C->env[C->unit];
+    e = &n;
+    if (C->unit && pname != GL_TEXTURE_ENV_MODE)
+        ONCE(0x5C400000 | ((pname & 0xff) << 16) | (v & 0xffff), "glTexEnv jednotky 1: %x = %x", pname, v);
+    switch (pname) {
+    case GL_TEXTURE_ENV_MODE:
+        if (v != GL_MODULATE && v != GL_REPLACE && v != GL_DECAL && v != GL_BLEND && v != 0x0104 &&
+            v != GL_COMBINE_ARB) {
+            ONCE(0x55100000 | (v & 0xffff), "glTexEnv mode %x (ako MODULATE)", v);
+            v = GL_MODULATE;
+        }
+        e->mode = v;
+        break;
+    case 0x8571: e->comb[0] = v; break;                         /* COMBINE_RGB */
+    case 0x8572: e->comb[1] = v; break;                         /* COMBINE_ALPHA */
+    case 0x8573: e->scale[0] = f[0]; break;                     /* RGB_SCALE */
+    case 0x0D1C: e->scale[1] = f[0]; break;                     /* ALPHA_SCALE */
+    case 0x2201:                                                /* TEXTURE_ENV_COLOR */
+        for (k = 0; k < 4; k++)
+            e->color[k] = f[k];
+        break;
+    default:
+        if (pname >= 0x8580 && pname <= 0x8582) e->src[0][pname - 0x8580] = v;
+        else if (pname >= 0x8588 && pname <= 0x858A) e->src[1][pname - 0x8588] = v;
+        else if (pname >= 0x8590 && pname <= 0x8592) e->op[0][pname - 0x8590] = v;
+        else if (pname >= 0x8598 && pname <= 0x859A) e->op[1][pname - 0x8598] = v;
+        else {
+            ONCE(0x55000000 | (pname & 0xffff), "glTexEnv %x %x = %x ignorovane", target, pname, v);
+            return;
+        }
+    }
+    {
+        const unsigned char *a = (const unsigned char *)&n, *b = (const unsigned char *)&C->env[C->unit];
+        for (k = 0; k < (int)sizeof(n) && a[k] == b[k]; k++)
+            ;
+        if (k == (int)sizeof(n))
+            return;                                 /* bez zmeny: dávka pokračuje */
+    }
+    FLUSH();
+    C->env[C->unit] = n;
+    if (!C->unit)
+        C->s.texEnv = n.mode;
 }
 
 static void tex_env(GLenum target, GLenum pname, GLint v)
 {
-    GLenum e;
-    CHECK();
-    if (C->unit) {
-        if (pname == GL_TEXTURE_ENV_MODE)
-            C->texEnv1 = v;
-        else if (pname == GL_COMBINE_RGB_ARB)
-            C->comb1 = v;
-        ONCE(0x5C400000 | ((pname & 0xff) << 16) | (v & 0xffff), "glTexEnv jednotky %d: %x = %x", C->unit, pname, v);
+    GLfloat f[4] = { (GLfloat)v, 0, 0, 0 };
+    if (pname == 0x2201)                            /* farba len cez fv/iv */
         return;
-    }
-    if (target != GL_TEXTURE_ENV) {
-        ONCE(0x55000000 | (pname & 0xffff), "glTexEnv %x %x = %x ignorovane", target, pname, v);
-        return;
-    }
-    if (pname == GL_TEXTURE_ENV_MODE) {
-        if (v != GL_MODULATE && v != GL_REPLACE && v != GL_DECAL && v != GL_COMBINE_ARB)
-            ONCE(0x55100000 | (v & 0xffff), "glTexEnv mode %x (ako MODULATE)", v);
-        C->envMode0 = v;
-    } else if (pname == GL_COMBINE_RGB_ARB) {
-        C->comb0 = v;
-    } else if (pname == GL_SOURCE0_RGB_ARB) {
-        C->src0 = v;
-    } else {
-        ONCE(0x55000000 | (pname & 0xffff), "glTexEnv %x %x = %x ignorovane", target, pname, v);
-        return;
-    }
-    e = env0_effective();
-    if (C->envMode0 == GL_COMBINE_ARB)
-        ONCE(0x55300000 ^ (C->comb0 & 0xffff) ^ ((C->src0 & 0xfff) << 16), "glTexEnv COMBINE jednotky 0: %x z %x -> %x",
-             C->comb0, C->src0, e);
-    if (e != C->s.texEnv) {
-        FLUSH();
-        C->s.texEnv = e;
+    tex_env_v(target, pname, f);
+}
+
+static void env_init(HwEnvUnit *e)
+{
+    int k;
+    memset(e, 0, sizeof(*e));
+    e->mode = e->comb[0] = e->comb[1] = GL_MODULATE;
+    for (k = 0; k < 2; k++) {
+        e->src[k][0] = GL_TEXTURE;
+        e->src[k][1] = 0x8578;                      /* PREVIOUS */
+        e->src[k][2] = 0x8576;                      /* CONSTANT */
+        e->op[k][0] = e->op[k][1] = k ? GL_SRC_ALPHA : GL_SRC_COLOR;
+        e->op[k][2] = GL_SRC_ALPHA;
+        e->scale[k] = 1.0f;
     }
 }
 
 void glTexEnvi(GLenum target, GLenum pname, GLint v) { tex_env(target, pname, v); }
-void glTexEnvf(GLenum target, GLenum pname, GLfloat v) { tex_env(target, pname, (GLint)v); }
-void glTexEnviv(GLenum target, GLenum pname, const GLint *v) { tex_env(target, pname, v[0]); }
-void glTexEnvfv(GLenum target, GLenum pname, const GLfloat *v) { tex_env(target, pname, (GLint)v[0]); }
+void glTexEnvf(GLenum target, GLenum pname, GLfloat v) { GLfloat f[4] = { v, 0, 0, 0 }; tex_env_v(target, pname, f); }
+void glTexEnvfv(GLenum target, GLenum pname, const GLfloat *v) { if (v) tex_env_v(target, pname, v); }
+void glTexEnviv(GLenum target, GLenum pname, const GLint *v)
+{
+    GLfloat f[4];
+    int k;
+    if (!v)
+        return;
+    for (k = 0; k < 4; k++)                         /* farba: celé čísla → 0…1 */
+        f[k] = pname == 0x2201 ? (GLfloat)((double)v[k] / 2147483647.0) : (GLfloat)v[k];
+    tex_env_v(target, pname, f);
+}
 
 void glGetTexEnviv(GLenum target, GLenum pname, GLint *v)
 {
@@ -1273,22 +1313,13 @@ static TexObj *active_tex(void)
     return C->s.tex2D && t && t->lv[0] ? t : 0;
 }
 
-/* q3-12: druhá jednotka — len s textúrou na jednotke 0 a GL_MODULATE (lightmapy Quake III) */
+/* q3-12: druhá jednotka — len s textúrou na jednotke 0 (lightmapy Quake III) */
 static TexObj *active_tex1(void)
 {
     TexObj *t = C->bound1;
     if (!gMT || !C->tex2D1 || !t || !t->lv[0] || !active_tex())
         return 0;
-    if (C->texEnv1 == GL_COMBINE_ARB) {             /* max-2: GL_COMBINE ako MODULATE (presne len pre MODULATE) */
-        if (C->comb1 != GL_MODULATE)
-            ONCE(0x55400000 | (C->comb1 & 0xffff), "glTexEnv COMBINE jednotky 1: %x (ako MODULATE)", C->comb1);
-        return t;
-    }
-    if (C->texEnv1 != GL_MODULATE) {
-        ONCE(0x55200000 | (C->texEnv1 & 0xffff), "glTexEnv jednotky 1 = %x nepodporovane (jednotka 1 vypnuta)", C->texEnv1);
-        return 0;
-    }
-    return t;
+    return t;                                       /* max-4: iný režim než MODULATE kreslí fragment program */
 }
 
 /* hl-9: pri 16-bit obrazovke 16-bit textúry (polovica VRAM; Half-Life pri 1024×768 minul VRAM) */
@@ -1412,6 +1443,11 @@ static void fill_state(HwState *st, TexObj *tex)
         st->wrapS = tex->wrapS;
         st->wrapT = tex->wrapT;
     }
+    /* max-4: iné prostredie než MODULATE/REPLACE/DECAL na jednotke 0 alebo iné než MODULATE na
+     * jednotke 1 → fragment program */
+    if (tex && !gNoFpg && ((C->env[0].mode != GL_MODULATE && C->env[0].mode != GL_REPLACE &&
+                            C->env[0].mode != GL_DECAL) || (gPBtex1 && C->env[1].mode != GL_MODULATE)))
+        st->env = C->env;
     if (tex && gPBtex1) {
         st->tex1 = gPBtex1->hw;
         st->minFilter1 = gPBtex1->minFilter;
@@ -3335,9 +3371,8 @@ void gl_ctx_init(GLCtx *c)
     c->cur[0] = c->cur[1] = c->cur[2] = c->cur[3] = 1.0f;
     c->curTex[3] = 1.0f;
     c->curTex1[3] = 1.0f;
-    c->texEnv1 = GL_MODULATE;
-    c->envMode0 = c->comb0 = c->comb1 = GL_MODULATE;
-    c->src0 = GL_TEXTURE;
+    env_init(&c->env[0]);
+    env_init(&c->env[1]);
     tex_init(&c->def, 0);
     c->bound = &c->def;
     c->unpackAlign = c->packAlign = 4;

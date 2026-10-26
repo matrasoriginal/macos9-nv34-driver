@@ -72,6 +72,14 @@ static void fp_upload(NVU32 off, const NVU32 *words, int count)
     __asm__ volatile("sync" ::: "memory");
 }
 
+static int memcmp_w(const NVU32 *a, const NVU32 *b, int n)
+{
+    while (n--)
+        if (*a++ != *b++)
+            return 1;
+    return 0;
+}
+
 HwTex *gTexPin;
 
 static NVU32 gFrame = 1, gEpoch = 1;
@@ -82,7 +90,7 @@ static long hwMode = -1, hwBlend = -1, hwAlpha = -1, hwDepth = -1, hwMask = -1, 
 static long hwTex = -1, hwTexKey = -1, hwTexEpoch = -1;
 static long hwTex1 = -1, hwTex1Key = -1, hwTex1Epoch = -1;
 static long hwTnl = -1, hwMatGen = -1, hwCull = -1, hwMv = -1;
-static long hwFin = -1, hwFogOn = -1;
+static long hwFin = -1, hwFogOn = -1, hwProg = -1;
 static NVU32 hwFogK[6];
 static int gVtx12 = -1, gColorBE, gCompact;        /* formát vrcholu (opt-5, q3-17) */
 static int gNoFog, gFogPlane;
@@ -93,7 +101,7 @@ static void invalidate(void)
     hwTex = hwTexKey = hwTexEpoch = -1;
     hwTex1 = hwTex1Key = hwTex1Epoch = -1;
     hwTnl = hwMatGen = hwCull = hwMv = -1;
-    hwFin = hwFogOn = -1;
+    hwFin = hwFogOn = hwProg = -1;
 }
 
 /* hl-2: ak GPU neodpovedá (timeout pri čakaní na miesto v push buffri), ďalej nič nepísať —
@@ -469,11 +477,301 @@ static void tnl_state(const HwState *st)
     }
 }
 
+/* ---- max-4: fragment programy pre glTexEnv (GL_COMBINE, BLEND, ADD, DECAL na 2 jednotkách) ----------
+ * Kódovanie NV30 podľa nouveau nvfx_shader.h (overené na kFpTex/kFpTex2). Program:
+ *   TXP R1, a[tex0], t[0]; (TXP R2, a[tex1], t[1]);
+ *   pre jednotku u: R3.xyz = op(argumenty RGB), R3.w = op(argumenty alfa)  (predošlá = a[col0] / R3)
+ *   MOVH H0, R3; END
+ * Argumenty s OPERAND 1−x a konštanty (TEXTURE_ENV_COLOR) idú najprv do R4–R6 (jedna inline konštanta
+ * a jeden vstup na inštrukciu). Výsledok H0 vidia combiners ako TEXTURE0, final combiner ho berie priamo.
+ * Programy v VRAM od fpOffset + FPG_BASE, 64 miest po 512 B (kľúč = stav prostredia). */
+#define FPG_BASE    0x400
+#define FPG_SLOT    0x200
+#define FPG_N       64
+#define FPG_KEYW    48
+
+#define FO_MOV  0x01
+#define FO_MUL  0x02
+#define FO_ADD  0x03
+#define FO_DP3  0x05
+#define FO_TXP  0x18
+#define FO_LRP  0x1F
+
+typedef struct FSrc { int type, reg, neg; NVU32 swz; float c[4]; } FSrc;   /* type 0 temp, 1 vstup, 2 konšt. */
+
+static NVU32 gFpg[160];
+static int gFpgN, gFpgMaxR, gFpgLast, gFpgOver;
+static NVU32 gFpgKey[FPG_N][FPG_KEYW], gFpgCtl[FPG_N];
+static int gFpgUsed, gFpgNext, gFpgLastSlot = -1;
+
+/* vstup (a[col0], a[texN]) sa udáva v slove 0 inštrukcie, v zdroji len typ a swizzle (kFpTex 0x1c9dc801) */
+static NVU32 fsrc_word(const FSrc *x)
+{
+    return (NVU32)x->type | (x->type == 0 ? (NVU32)x->reg << 2 : 0) | (x->swz << 9) | (x->neg ? 1u << 17 : 0);
+}
+
+static void fpg_emit(int op, int dst, int half, int mask, int sat, int scale, int texu, const FSrc *s0,
+                     const FSrc *s1, const FSrc *s2)
+{
+    const FSrc *ss[3] = { s0, s1, s2 }, *cs = 0;
+    NVU32 w0, w1, w2, w3, in = 0;
+    int i;
+    if (gFpgN + 8 > (int)(sizeof(gFpg) / 4)) {
+        gFpgOver = 1;
+        return;
+    }
+    for (i = 0; i < 3; i++)
+        if (ss[i]) {
+            if (ss[i]->type == 1)
+                in = (NVU32)ss[i]->reg;
+            if (ss[i]->type == 2)
+                cs = ss[i];
+        }
+    if (texu >= 0)
+        in = 4 + (NVU32)texu;
+    w0 = ((NVU32)op << 24) | (sat ? 0x80000000u : 0) | ((NVU32)(texu > 0 ? texu : 0) << 17) | (in << 13) |
+         ((NVU32)mask << 9) | (half ? 0x80u : 0) | ((NVU32)dst << 1);
+    w1 = fsrc_word(s0) | (7u << 18) | (0xE4u << 21);
+    w2 = s1 ? fsrc_word(s1) : 0x0001c800;
+    w2 |= (NVU32)scale << 28;
+    w3 = s2 ? fsrc_word(s2) : 0x3fe1c800;
+    gFpgLast = gFpgN;
+    gFpg[gFpgN++] = w0;
+    gFpg[gFpgN++] = w1;
+    gFpg[gFpgN++] = w2;
+    gFpg[gFpgN++] = w3;
+    if (cs)
+        for (i = 0; i < 4; i++) {
+            union { float f; NVU32 u; } c;
+            c.f = cs->c[i];
+            gFpg[gFpgN++] = c.u;
+        }
+    if (!half && dst > gFpgMaxR)
+        gFpgMaxR = dst;
+}
+
+static FSrc fs_temp(int r, NVU32 swz) { FSrc x; memset(&x, 0, sizeof(x)); x.reg = r; x.swz = swz; return x; }
+
+static FSrc fs_const(float a, float b, float c, float d)
+{
+    FSrc x;
+    memset(&x, 0, sizeof(x));
+    x.type = 2;
+    x.swz = 0xE4;
+    x.c[0] = a; x.c[1] = b; x.c[2] = c; x.c[3] = d;
+    return x;
+}
+
+/* argument i jednotky u (alpha = 0 RGB, 1 alfa) → FSrc, prípadne cez R4+i */
+static FSrc fpg_arg(const HwEnvUnit *e, int u, int units, int alpha, int i)
+{
+    GLenum src = e->src[alpha][i], op = e->op[alpha][i];
+    int am = op == GL_SRC_ALPHA || op == 0x0303, inv = op == 0x0301 || op == 0x0303;
+    FSrc x;
+    memset(&x, 0, sizeof(x));
+    x.swz = am ? 0xFF : 0xE4;
+    if (src == 0x8576) {                            /* CONSTANT: hodnota na CPU */
+        int k;
+        float v[4];
+        for (k = 0; k < 4; k++) {
+            v[k] = am ? e->color[3] : e->color[k];
+            if (inv)
+                v[k] = 1.0f - v[k];
+        }
+        x = fs_const(v[0], v[1], v[2], v[3]);
+        fpg_emit(FO_MOV, 4 + i, 0, 0xF, 0, 0, -1, &x, 0, 0);
+        return fs_temp(4 + i, 0xE4);
+    }
+    if (src == 0x8577 || (src == 0x8578 && u == 0)) {   /* PRIMARY_COLOR, PREVIOUS na jednotke 0 */
+        x.type = 1;
+        x.reg = 1;                                  /* a[col0] */
+    } else if (src == 0x8578) {
+        x.reg = 3;
+    } else if (src >= 0x84C0 && src < 0x84C0 + (GLenum)units) {
+        x.reg = 1 + (int)(src - 0x84C0);            /* crossbar: TEXTUREn */
+    } else {
+        x.reg = 1 + u;                              /* GL_TEXTURE */
+    }
+    if (inv) {
+        FSrc one = fs_const(1, 1, 1, 1);
+        x.neg = 1;
+        fpg_emit(FO_ADD, 4 + i, 0, 0xF, 0, 0, -1, &x, &one, 0);
+        return fs_temp(4 + i, 0xE4);
+    }
+    return x;
+}
+
+static int fpg_scale(float s) { return s >= 3.5f ? 2 : s >= 1.5f ? 1 : 0; }
+
+/* jedna časť (RGB alebo alfa) jednotky u do R3 s maskou m */
+static void fpg_part(const HwEnvUnit *e, int u, int units, int alpha, int m)
+{
+    GLenum comb = e->comb[alpha];
+    int n = comb == GL_REPLACE ? 1 : comb == 0x8575 ? 3 : 2, i, sc = fpg_scale(e->scale[alpha]);
+    FSrc a[3], half;
+    for (i = 0; i < n; i++)
+        a[i] = fpg_arg(e, u, units, alpha, i);
+    switch (comb) {
+    case GL_REPLACE:
+        fpg_emit(FO_MOV, 3, 0, m, 1, sc, -1, &a[0], 0, 0);
+        break;
+    case 0x0104:                                    /* ADD */
+        fpg_emit(FO_ADD, 3, 0, m, 1, sc, -1, &a[0], &a[1], 0);
+        break;
+    case 0x8574:                                    /* ADD_SIGNED */
+        half = fs_const(-0.5f, -0.5f, -0.5f, -0.5f);
+        fpg_emit(FO_ADD, 6, 0, m, 0, 0, -1, &a[0], &a[1], 0);
+        a[2] = fs_temp(6, 0xE4);
+        fpg_emit(FO_ADD, 3, 0, m, 1, sc, -1, &a[2], &half, 0);
+        break;
+    case 0x8575:                                    /* INTERPOLATE: a0·a2 + a1·(1−a2) */
+        fpg_emit(FO_LRP, 3, 0, m, 1, sc, -1, &a[2], &a[0], &a[1]);
+        break;
+    case 0x84E7:                                    /* SUBTRACT */
+        a[1].neg = !a[1].neg;
+        fpg_emit(FO_ADD, 3, 0, m, 1, sc, -1, &a[0], &a[1], 0);
+        break;
+    case 0x86AE: case 0x86AF: {                     /* DOT3_RGB(A): 4·(a0−½)·(a1−½) */
+        FSrc t0, t1;
+        half = fs_const(-0.5f, -0.5f, -0.5f, -0.5f);
+        fpg_emit(FO_ADD, 4, 0, 0xF, 0, 0, -1, &a[0], &half, 0);
+        fpg_emit(FO_ADD, 5, 0, 0xF, 0, 0, -1, &a[1], &half, 0);
+        t0 = fs_temp(4, 0xE4);
+        t1 = fs_temp(5, 0xE4);
+        fpg_emit(FO_DP3, 3, 0, comb == 0x86AF ? 0xF : m, 1, 2, -1, &t0, &t1, 0);
+        break;
+    }
+    default:                                        /* MODULATE */
+        fpg_emit(FO_MUL, 3, 0, m, 1, sc, -1, &a[0], &a[1], 0);
+        break;
+    }
+}
+
+/* pevné režimy → COMBINE */
+static void fpg_norm(const HwEnvUnit *in, HwEnvUnit *e)
+{
+    *e = *in;
+    if (in->mode == 0x8570)
+        return;
+    e->scale[0] = e->scale[1] = 1.0f;
+    e->src[0][0] = e->src[1][0] = GL_TEXTURE;
+    e->src[0][1] = e->src[1][1] = 0x8578;
+    e->op[0][0] = e->op[0][1] = GL_SRC_COLOR;
+    e->op[1][0] = e->op[1][1] = GL_SRC_ALPHA;
+    e->comb[0] = e->comb[1] = GL_MODULATE;
+    switch (in->mode) {
+    case GL_REPLACE:
+        e->comb[0] = e->comb[1] = GL_REPLACE;
+        break;
+    case GL_DECAL:                                  /* RGB = lerp(predošlá, tex, tex.a), alfa = predošlá */
+        e->comb[0] = 0x8575;
+        e->src[0][2] = GL_TEXTURE;
+        e->op[0][2] = GL_SRC_ALPHA;
+        e->comb[1] = GL_REPLACE;
+        e->src[1][0] = 0x8578;
+        break;
+    case GL_BLEND:                                  /* RGB = lerp(farba prostredia, predošlá, tex) */
+        e->comb[0] = 0x8575;
+        e->src[0][0] = 0x8576;
+        e->src[0][2] = GL_TEXTURE;
+        e->op[0][2] = GL_SRC_COLOR;
+        break;
+    case 0x0104:                                    /* ADD */
+        e->comb[0] = 0x0104;
+        break;
+    }
+}
+
+static void fpg_key(const HwEnvUnit *env, int units, NVU32 *k)
+{
+    int u, i;
+    memset(k, 0, FPG_KEYW * 4);
+    k[0] = (NVU32)units;
+    for (u = 0; u < units; u++) {
+        HwEnvUnit e;
+        const NVU32 *w;
+        fpg_norm(&env[u], &e);
+        w = (const NVU32 *)&e;
+        for (i = 0; i < (int)(sizeof(e) / 4) && 1 + u * 23 + i < FPG_KEYW; i++)
+            k[1 + u * 23 + i] = w[i];
+    }
+}
+
+/* program pre prostredie env (units jednotiek) → posun v VRAM a FP_CONTROL */
+static NVU32 fpg_get(const HwEnvUnit *env, int units, NVU32 *ctl)
+{
+    NVU32 key[FPG_KEYW];
+    FSrc r3;
+    int i, slot, u;
+    fpg_key(env, units, key);
+    if (gFpgLastSlot >= 0 && !memcmp_w(gFpgKey[gFpgLastSlot], key, FPG_KEYW)) {
+        *ctl = gFpgCtl[gFpgLastSlot];
+        return FPG_BASE + (NVU32)gFpgLastSlot * FPG_SLOT;
+    }
+    for (i = 0; i < gFpgUsed; i++)
+        if (!memcmp_w(gFpgKey[i], key, FPG_KEYW)) {
+            gFpgLastSlot = i;
+            *ctl = gFpgCtl[i];
+            return FPG_BASE + (NVU32)i * FPG_SLOT;
+        }
+    gFpgN = 0;
+    gFpgMaxR = 0;
+    gFpgOver = 0;
+    for (u = 0; u < units; u++) {
+        FSrc tc = fs_temp(0, 0xE4);
+        tc.type = 1;
+        tc.reg = 4 + u;
+        fpg_emit(FO_TXP, 1 + u, 0, 0xF, 0, 0, u, &tc, 0, 0);
+    }
+    for (u = 0; u < units; u++) {
+        HwEnvUnit e;
+        fpg_norm(&env[u], &e);
+        if (e.comb[0] == 0x86AF) {
+            fpg_part(&e, u, units, 0, 0xF);
+        } else {
+            fpg_part(&e, u, units, 0, 0x7);
+            fpg_part(&e, u, units, 1, 0x8);
+        }
+    }
+    r3 = fs_temp(3, 0xE4);
+    fpg_emit(FO_MOV, 0, 1, 0xF, 0, 0, -1, &r3, 0, 0);
+    gFpg[gFpgLast] |= 1;                            /* END */
+    if (gFpgOver || gFpgN * 4 > FPG_SLOT) {
+        static int logged;
+        if (!logged++)
+            lg("texenv program: prilis dlhy (%d slov)", gFpgN);
+        *ctl = 0;
+        return 0;
+    }
+    if (gFpgUsed < FPG_N) {
+        slot = gFpgUsed++;
+    } else {
+        slot = gFpgNext;
+        gFpgNext = (gFpgNext + 1) % FPG_N;
+        hw_finish();                                /* GPU ešte môže čítať starý program v tomto mieste */
+    }
+    for (i = 0; i < FPG_KEYW; i++)
+        gFpgKey[slot][i] = key[i];
+    gFpgCtl[slot] = (NVU32)gFpgMaxR / 2;            /* (počet R − 1) / 2 */
+    fp_upload(FPG_BASE + (NVU32)slot * FPG_SLOT, gFpg, gFpgN);
+    if (gFpgUsed <= 12) {
+        lg("texenv program %d: %d jednotky, %d slov, R0-R%d; j0 %x %x/%x z %x %x %x / %x %x %x", slot, units, gFpgN,
+           gFpgMaxR, env[0].mode, env[0].comb[0], env[0].comb[1], env[0].src[0][0], env[0].src[0][1],
+           env[0].src[0][2], env[0].op[0][0], env[0].op[0][1], env[0].op[0][2]);
+        if (units == 2)
+            lg("  j1 %x %x/%x z %x %x %x / %x %x %x", env[1].mode, env[1].comb[0], env[1].comb[1], env[1].src[0][0],
+               env[1].src[0][1], env[1].src[0][2], env[1].op[0][0], env[1].op[0][1], env[1].op[0][2]);
+    }
+    gFpgLastSlot = slot;
+    *ctl = gFpgCtl[slot];
+    return FPG_BASE + (NVU32)slot * FPG_SLOT;
+}
+
 /* vráti 0 bez textúry, 1 s textúrou, 2 s dvoma (textúry sú vo VRAM) */
 int hw_state(HwTarget *t, const HwState *st)
 {
     long key;
-    int mode = st->tex && tex_resident(st->tex), fog;
+    int mode = st->tex && tex_resident(st->tex), fog, gen;
 
     /* q3-12: druhá jednotka (nie s pôvodným 12-slovným formátom nv34glvtx12) */
     vtx_init();
@@ -492,10 +790,6 @@ int hw_state(HwTarget *t, const HwState *st)
             data(0);
             hwTex1 = -1;
         }
-        if (mode == 2 || hwMode == 2 || hwMode < 0) {
-            begin(M_FP_ACTIVE_PROGRAM, 1);
-            data((S->g->fpOffset + (mode == 2 ? FP2_OFF : 0)) | 1);
-        }
         if (!mode) {
             begin(M_TEX_UNITS_ENABLE, 1);
             data(0);
@@ -512,16 +806,35 @@ int hw_state(HwTarget *t, const HwState *st)
         }
         hwMode = mode;
     }
+    /* program: kFpTex / kFpTex2, max-4: pri inom prostredí vygenerovaný (FP_CONTROL = počet registrov) */
+    gen = 0;
+    if (mode) {
+        NVU32 prog = mode == 2 ? FP2_OFF : 0, ctl = 0;
+        if (st->env) {
+            NVU32 g = fpg_get(st->env, mode, &ctl);
+            if (g) {
+                prog = g;
+                gen = 1;
+            }
+        }
+        if (hwProg != (long)prog) {
+            begin(M_FP_ACTIVE_PROGRAM, 1);
+            data((S->g->fpOffset + prog) | 1);
+            begin(M_FP_CONTROL, 1);
+            data(ctl);
+            hwProg = prog;
+        }
+    }
     /* final combiner: farba = D (primárna / spare0); s hmlou A·B + (1−A)·C, A = FOG.a (faktor hmly),
      * B = farba, C = FOG.rgb (farba hmly) ako v nouveau nv10_state_frag.c */
     /* wolf-8: len pri T&L — zdroj 6 (súradnica z vrcholu, NV20) NV30 odmietol (DATA_ERROR na 0x8c8) */
     fog = st->fog && st->tnl && !gNoFog && !gVtx12;
-    key = (mode != 0) | (fog << 1);
+    key = (mode != 0) | (fog << 1) | (gen << 2);
     if (hwFin != key) {
-        NVU32 col = mode ? 0x0c : 0x04;
+        NVU32 col = gen ? 0x08 : mode ? 0x0c : 0x04;   /* max-4: výsledok programu (TEXTURE0) priamo */
         begin(M_RC_FINAL0, 3);
         data(fog ? (0x13u << 24) | (col << 16) | (0x03u << 8) : col);
-        data(mode ? 0x00001c00 : 0x00001400);
+        data((col | 0x10) << 8);
         data(0x01000101);
         hwFin = key;
     }

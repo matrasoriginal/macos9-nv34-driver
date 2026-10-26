@@ -691,4 +691,7 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
   (`i2c-hwclock` na I2C uni-n, adresa 0xd2, `platform-do-set-values`/`clockspreading`; Linux
   pmac_tweak_clock_spreading mení jeho registre pre „AlBook 12" rev 2“) — horná predvoľba čipu
   je zrejme ~120 MHz; 133 MHz by chcelo zápis do registrov čipu cez I2C (neskúšané).
+- rave-27: NV34 RAVE vrátený na verziu pred rave-25 (72dccfb) — v UT sa prekrývali steny.
+  Kratší vrchol, priamy zápis aj `nv34ravestats`/`nv34ravelong` sú preč (RAVE aj tak tvoril ~3–6 %
+  snímky).
 

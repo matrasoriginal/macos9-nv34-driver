@@ -766,7 +766,7 @@ static int comps_of(GLenum format)
 }
 
 /* riadok zdroja → ARGB32 podľa formátu a základného vnútorného formátu */
-static void convert_row(NVU32 *dst, const GLubyte *src, int w, GLenum format, GLenum base)
+static void convert_row8(NVU32 *dst, const GLubyte *src, int w, GLenum format, GLenum base)
 {
     int x;
     for (x = 0; x < w; x++) {
@@ -795,12 +795,116 @@ static void convert_row(NVU32 *dst, const GLubyte *src, int w, GLenum format, GL
     }
 }
 
+/* max-1: Max Payne posiela textúry s typom GL_UNSIGNED_SHORT (0x1403) → biele. Ďalšie typy sa
+ * rozbalia na bajty v poradí zložiek formátu a prevedú ako GL_UNSIGNED_BYTE. */
+static int packed_bytes(GLenum type)
+{
+    switch (type) {
+    case 0x8033: case 0x8034: case 0x8363: case 0x8364: case 0x8365: case 0x8366: return 2;
+    case 0x8035: case 0x8036: case 0x8367: case 0x8368: return 4;
+    }
+    return 0;
+}
+
+static int type_bytes(GLenum type)
+{
+    switch (type) {
+    case 0x1402: case 0x1403: return 2;                 /* (UNSIGNED_)SHORT */
+    case 0x1404: case 0x1405: case 0x1406: return 4;    /* (UNSIGNED_)INT, FLOAT */
+    }
+    return 1;
+}
+
+static int type_ok(GLenum type)
+{
+    return type == GL_UNSIGNED_BYTE || type == 0x1400 || packed_bytes(type) || type_bytes(type) > 1;
+}
+
+/* bajty na pixel zdroja */
+static int pix_bytes(GLenum format, GLenum type)
+{
+    int p = packed_bytes(type);
+    return p ? p : comps_of(format) * type_bytes(type);
+}
+
+static GLubyte gUnpack[2048 * 4];
+
+/* zbalený pixel v → zložky c[0..n-1] v poradí formátu; šírky wd[] v poradí zložiek, c0 v najvyšších
+ * bitoch (rev = v najnižších, typy *_REV) */
+static void unpack_bits(NVU32 v, int n, const int *wd, int rev, GLubyte *c)
+{
+    int i, sh = 0;
+    if (!rev)
+        for (i = 0; i < n; i++)
+            sh += wd[i];
+    for (i = 0; i < n; i++) {
+        NVU32 m = (1u << wd[i]) - 1;
+        if (!rev)
+            sh -= wd[i];
+        c[i] = (GLubyte)(((v >> sh) & m) * 255 / m);
+        if (rev)
+            sh += wd[i];
+    }
+}
+
+static void convert_row(NVU32 *dst, const GLubyte *src, int w, GLenum format, GLenum type, GLenum base)
+{
+    static const int w4444[4] = { 4, 4, 4, 4 }, w5551[4] = { 5, 5, 5, 1 }, w565[3] = { 5, 6, 5 },
+                     w8888[4] = { 8, 8, 8, 8 }, w1010102[4] = { 10, 10, 10, 2 };
+    int x, i, n = comps_of(format);
+    GLubyte *o = gUnpack;
+    if (type == GL_UNSIGNED_BYTE || type == 0x1400 || w > 2048) {
+        convert_row8(dst, src, w, format, base);
+        return;
+    }
+    for (x = 0; x < w; x++, o += n) {
+        switch (type) {
+        case 0x1402: case 0x1403:                       /* 16-bit zložky (BE): horný bajt */
+            for (i = 0; i < n; i++)
+                o[i] = src[i * 2];
+            src += n * 2;
+            break;
+        case 0x1404: case 0x1405:
+            for (i = 0; i < n; i++)
+                o[i] = src[i * 4];
+            src += n * 4;
+            break;
+        case 0x1406:
+            for (i = 0; i < n; i++) {
+                float f = ((const float *)src)[i];
+                o[i] = f <= 0 ? 0 : f >= 1 ? 255 : (GLubyte)(f * 255.0f + 0.5f);
+            }
+            src += n * 4;
+            break;
+        default: {
+            NVU32 v = packed_bytes(type) == 2 ? ((NVU32)src[0] << 8 | src[1]) :
+                      ((NVU32)src[0] << 24 | (NVU32)src[1] << 16 | (NVU32)src[2] << 8 | src[3]);
+            src += packed_bytes(type);
+            switch (type) {
+            case 0x8033: unpack_bits(v, 4, w4444, 0, o); break;     /* 4_4_4_4 */
+            case 0x8365: unpack_bits(v, 4, w4444, 1, o); break;     /* 4_4_4_4_REV */
+            case 0x8034: unpack_bits(v, 4, w5551, 0, o); break;     /* 5_5_5_1 */
+            case 0x8366: unpack_bits(v, 4, w5551, 1, o); break;     /* 1_5_5_5_REV */
+            case 0x8363: unpack_bits(v, 3, w565, 0, o); break;      /* 5_6_5 */
+            case 0x8364: unpack_bits(v, 3, w565, 1, o); break;      /* 5_6_5_REV */
+            case 0x8035: unpack_bits(v, 4, w8888, 0, o); break;     /* 8_8_8_8 */
+            case 0x8367: unpack_bits(v, 4, w8888, 1, o); break;     /* 8_8_8_8_REV */
+            case 0x8036: unpack_bits(v, 4, w1010102, 0, o); break;
+            case 0x8368: unpack_bits(v, 4, w1010102, 1, o); break;
+            }
+            break;
+        }
+        }
+    }
+    convert_row8(dst, gUnpack, w, format, base);
+}
+
 static int mip_filter(GLenum f);
 
-static long src_stride(int w, GLenum format)
+static long src_stride(int w, GLenum format, GLenum type)
 {
     long rl = C->unpackRowLength > 0 ? C->unpackRowLength : w;
-    long bytes = rl * comps_of(format);
+    long bytes = rl * pix_bytes(format, type);
     long al = C->unpackAlign > 0 ? C->unpackAlign : 1;
     return (bytes + al - 1) / al * al;
 }
@@ -812,7 +916,8 @@ static int is_pow2(int v) { return v > 0 && !(v & (v - 1)); }
  * ostatné úrovne podľa úrovne 0. */
 static NVU32 gRow[2048];
 
-static int store_format(TexObj *t, int level, GLenum base, const GLvoid *pixels, int w, int h, GLenum format)
+static int store_format(TexObj *t, int level, GLenum base, const GLvoid *pixels, int w, int h, GLenum format,
+                        GLenum type)
 {
     int y, x;
     if (!C || !C->hasRT || C->rt.bpp != 16)
@@ -822,9 +927,9 @@ static int store_format(TexObj *t, int level, GLenum base, const GLvoid *pixels,
     if (base == GL_RGB || base == GL_LUMINANCE || !pixels)
         return 0x02;
     {
-        long stride = src_stride(w, format);
+        long stride = src_stride(w, format, type);
         for (y = 0; y < h; y++) {
-            convert_row(gRow, (const GLubyte *)pixels + y * stride, w, format, base);
+            convert_row(gRow, (const GLubyte *)pixels + y * stride, w, format, type, base);
             for (x = 0; x < w; x++) {
                 NVU32 a = gRow[x] >> 24;
                 if (a != 0 && a != 255)
@@ -836,15 +941,16 @@ static int store_format(TexObj *t, int level, GLenum base, const GLvoid *pixels,
 }
 
 /* riadok zdroja do kópie úrovne `level` na (x0, y) */
-static void store_row(TexObj *t, int level, int x0, int y, int w, const GLubyte *src, GLenum format, GLenum base)
+static void store_row(TexObj *t, int level, int x0, int y, int w, const GLubyte *src, GLenum format, GLenum type,
+                      GLenum base)
 {
     int sf = t->sfmt[level], x;
     long off = (long)y * t->w[level] + x0;
     if (sf == 0x06) {
-        convert_row((NVU32 *)t->lv[level] + off, src, w, format, base);
+        convert_row((NVU32 *)t->lv[level] + off, src, w, format, type, base);
         return;
     }
-    convert_row(gRow, src, w, format, base);
+    convert_row(gRow, src, w, format, type, base);
     {
         NVU16 *d = (NVU16 *)t->lv[level] + off;
         for (x = 0; x < w; x++)
@@ -875,7 +981,8 @@ void glTexImage2D(GLenum target, GLint level, GLint internal, GLsizei w, GLsizei
         return;
     }
     if (type != GL_UNSIGNED_BYTE)
-        ONCE(0x53100000 | (type & 0xffff), "glTexImage2D: typ %x (len UNSIGNED_BYTE)", type);
+        ONCE(0x53100000 ^ (type & 0xffff) ^ ((format & 0xfff) << 16), "glTexImage2D: typ %x, format %x, vnutorny %x, %dx%d%s",
+             type, format, internal, w, h, type_ok(type) ? " (prevod)" : " (nepodporovane, biela)");
     if (border)
         ONCE(0x53200000, "glTexImage2D: okraj %d ignorovany", border);
     if (!is_pow2(w) || !is_pow2(h))
@@ -885,7 +992,7 @@ void glTexImage2D(GLenum target, GLint level, GLint internal, GLsizei w, GLsizei
     base = base_of(internal);
     if (level == 0)
         t->hasAlpha = base != GL_RGB && base != GL_LUMINANCE;
-    sfmt = store_format(t, level, base, pixels && type == GL_UNSIGNED_BYTE ? pixels : 0, w, h, format);
+    sfmt = store_format(t, level, base, pixels && type_ok(type) ? pixels : 0, w, h, format, type);
     bpp = sfmt == 0x06 ? 4 : 2;
     if (t->lv[level] && (t->w[level] != w || t->h[level] != h || t->sfmt[level] != sfmt)) {
         mem_free(t->lv[level]);
@@ -908,12 +1015,12 @@ void glTexImage2D(GLenum target, GLint level, GLint internal, GLsizei w, GLsizei
         lg("TexImage2D tex %u lvl %d %dx%d int %x fmt %x typ %x pix %x -> RAM fmt %x", t->name, level, w, h, internal,
            format, type, (NVU32)pixels, sfmt);
     }
-    if (!pixels || type != GL_UNSIGNED_BYTE) {
+    if (!pixels || !type_ok(type)) {
         memset(t->lv[level], 0xff, (long)w * h * bpp);
     } else {
-        long stride = src_stride(w, format);
+        long stride = src_stride(w, format, type);
         for (y = 0; y < h; y++)
-            store_row(t, level, 0, y, w, (const GLubyte *)pixels + y * stride, format, base);
+            store_row(t, level, 0, y, w, (const GLubyte *)pixels + y * stride, format, type, base);
     }
     t->dirty = 1;
 }
@@ -933,8 +1040,8 @@ void glTexSubImage2D(GLenum target, GLint level, GLint xo, GLint yo, GLsizei w, 
         set_err(GL_INVALID_VALUE);
         return;
     }
-    if (type != GL_UNSIGNED_BYTE) {
-        ONCE(0x53400000 | (type & 0xffff), "glTexSubImage2D: typ %x", type);
+    if (!type_ok(type)) {
+        ONCE(0x53400000 | (type & 0xffff), "glTexSubImage2D: typ %x nepodporovany", type);
         return;
     }
     if (gTexDbg && gTexDbgN < 3000 && first_time(0x5F000000 ^ t->name)) {
@@ -943,11 +1050,11 @@ void glTexSubImage2D(GLenum target, GLint level, GLint xo, GLint yo, GLsizei w, 
     }
     FLUSH();
     base = t->hasAlpha ? GL_RGBA : GL_RGB;
-    stride = src_stride(w, format);
+    stride = src_stride(w, format, type);
     if (w > 2048)
         return;
     for (y = 0; y < h; y++)
-        store_row(t, level, xo, yo + y, w, (const GLubyte *)pixels + y * stride, format, base);
+        store_row(t, level, xo, yo + y, w, (const GLubyte *)pixels + y * stride, format, type, base);
     if (level != 0 || t->dirty || !t->hw || !hw_tex_resident(t->hw) || mip_filter(t->minFilter) ||
         !hw_tex_subupload(t->hw, xo, yo, w, h,
                           t->sfmt[0] == 0x06 ? (const void *)((const NVU32 *)t->lv[0] + (long)yo * t->w[0] + xo)

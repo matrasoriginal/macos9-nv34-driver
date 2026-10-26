@@ -209,6 +209,8 @@ typedef struct GLCtx {
     int     unit, cunit, tex2D1;
     TexObj *bound1;
     GLenum  texEnv1;
+    /* max-2: GL_COMBINE (ARB_texture_env_combine) — režim, COMBINE_RGB a SOURCE0_RGB jednotky 0 a 1 */
+    GLenum  envMode0, comb0, src0, comb1;
     Arr     ta1;
     float   curTex1[4];
     int     unpackAlign, unpackRowLength, packAlign;

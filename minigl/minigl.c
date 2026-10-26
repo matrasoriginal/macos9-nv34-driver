@@ -1197,23 +1197,56 @@ void glGetTexParameterfv(GLenum target, GLenum pname, GLfloat *v)
     *v = (GLfloat)i;
 }
 
+#define GL_COMBINE_ARB      0x8570
+#define GL_COMBINE_RGB_ARB  0x8571
+#define GL_SOURCE0_RGB_ARB  0x8580
+
+/* max-2: jednotka 0 — GL_COMBINE s REPLACE z textúry = GL_REPLACE, inak ako MODULATE */
+static GLenum env0_effective(void)
+{
+    if (C->envMode0 != GL_COMBINE_ARB)
+        return C->envMode0;
+    if (C->comb0 == GL_REPLACE && C->src0 == GL_TEXTURE)
+        return GL_REPLACE;
+    return GL_MODULATE;
+}
+
 static void tex_env(GLenum target, GLenum pname, GLint v)
 {
+    GLenum e;
     CHECK();
     if (C->unit) {
         if (pname == GL_TEXTURE_ENV_MODE)
             C->texEnv1 = v;
+        else if (pname == GL_COMBINE_RGB_ARB)
+            C->comb1 = v;
         ONCE(0x5C400000 | ((pname & 0xff) << 16) | (v & 0xffff), "glTexEnv jednotky %d: %x = %x", C->unit, pname, v);
         return;
     }
-    if (target != GL_TEXTURE_ENV || pname != GL_TEXTURE_ENV_MODE) {
+    if (target != GL_TEXTURE_ENV) {
         ONCE(0x55000000 | (pname & 0xffff), "glTexEnv %x %x = %x ignorovane", target, pname, v);
         return;
     }
-    if (v != GL_MODULATE && v != GL_REPLACE && v != GL_DECAL)
-        ONCE(0x55100000 | (v & 0xffff), "glTexEnv mode %x (ako MODULATE)", v);
-    FLUSH();
-    C->s.texEnv = v;
+    if (pname == GL_TEXTURE_ENV_MODE) {
+        if (v != GL_MODULATE && v != GL_REPLACE && v != GL_DECAL && v != GL_COMBINE_ARB)
+            ONCE(0x55100000 | (v & 0xffff), "glTexEnv mode %x (ako MODULATE)", v);
+        C->envMode0 = v;
+    } else if (pname == GL_COMBINE_RGB_ARB) {
+        C->comb0 = v;
+    } else if (pname == GL_SOURCE0_RGB_ARB) {
+        C->src0 = v;
+    } else {
+        ONCE(0x55000000 | (pname & 0xffff), "glTexEnv %x %x = %x ignorovane", target, pname, v);
+        return;
+    }
+    e = env0_effective();
+    if (C->envMode0 == GL_COMBINE_ARB)
+        ONCE(0x55300000 ^ (C->comb0 & 0xffff) ^ ((C->src0 & 0xfff) << 16), "glTexEnv COMBINE jednotky 0: %x z %x -> %x",
+             C->comb0, C->src0, e);
+    if (e != C->s.texEnv) {
+        FLUSH();
+        C->s.texEnv = e;
+    }
 }
 
 void glTexEnvi(GLenum target, GLenum pname, GLint v) { tex_env(target, pname, v); }
@@ -1246,6 +1279,11 @@ static TexObj *active_tex1(void)
     TexObj *t = C->bound1;
     if (!gMT || !C->tex2D1 || !t || !t->lv[0] || !active_tex())
         return 0;
+    if (C->texEnv1 == GL_COMBINE_ARB) {             /* max-2: GL_COMBINE ako MODULATE (presne len pre MODULATE) */
+        if (C->comb1 != GL_MODULATE)
+            ONCE(0x55400000 | (C->comb1 & 0xffff), "glTexEnv COMBINE jednotky 1: %x (ako MODULATE)", C->comb1);
+        return t;
+    }
     if (C->texEnv1 != GL_MODULATE) {
         ONCE(0x55200000 | (C->texEnv1 & 0xffff), "glTexEnv jednotky 1 = %x nepodporovane (jednotka 1 vypnuta)", C->texEnv1);
         return 0;
@@ -3298,6 +3336,8 @@ void gl_ctx_init(GLCtx *c)
     c->curTex[3] = 1.0f;
     c->curTex1[3] = 1.0f;
     c->texEnv1 = GL_MODULATE;
+    c->envMode0 = c->comb0 = c->comb1 = GL_MODULATE;
+    c->src0 = GL_TEXTURE;
     tex_init(&c->def, 0);
     c->bound = &c->def;
     c->unpackAlign = c->packAlign = 4;

@@ -715,6 +715,10 @@ static void fpg_canon(HwEnvUnit *e)
     }
     if (!usesConst)
         e->color[0] = e->color[1] = e->color[2] = e->color[3] = 0;
+    for (i = 0; i < 4; i++)                         /* max-7: farba na 1/255 (rovnaký program) */
+        e->color[i] = (float)(e->color[i] <= 0 ? 0 : e->color[i] >= 1 ? 255 : (int)(e->color[i] * 255.0f + 0.5f));
+    for (p = 0; p < 2; p++)                         /* max-7: mierka len 1, 2, 4 (DST_SCALE) */
+        e->scale[p] = (float)fpg_scale(e->scale[p]);
 }
 
 static void fpg_key(const HwEnvUnit *env, int units, NVU32 *k)
@@ -785,6 +789,13 @@ static NVU32 fpg_get(const HwEnvUnit *env, int units, NVU32 *ctl)
         return 0;
     }
     gFpgNew++;
+    if (gFpgNew <= 40 && gFpgLastSlot >= 0) {      /* max-7: čím sa nový kľúč líši od posledného */
+        for (i = 0; i < FPG_KEYW && key[i] == gFpgKey[gFpgLastSlot][i]; i++)
+            ;
+        if (i < FPG_KEYW)
+            lg("texenv novy kluc: slovo %d (jednotka %d, pole %d) %x -> %x", i, i ? (i - 1) / 23 : -1,
+               i ? (i - 1) % 23 : -1, gFpgKey[gFpgLastSlot][i], key[i]);
+    }
     if (gFpgUsed < FPG_N) {
         slot = gFpgUsed++;
     } else {
@@ -810,13 +821,15 @@ static NVU32 fpg_get(const HwEnvUnit *env, int units, NVU32 *ctl)
     gFpgFrame[slot] = gFrame;
     gFpgCtl[slot] = (NVU32)gFpgMaxR / 2;            /* (počet R − 1) / 2 */
     fp_upload(FPG_BASE + (NVU32)slot * FPG_SLOT, gFpg, gFpgN);
-    if (gFpgUsed <= 12) {
+    hwProg = -1;                                    /* max-7: nový obsah aj na tej istej adrese → znova nastaviť */
+    if (gFpgUsed <= 12 || (gFpgNew & 1023) == 0) {
         lg("texenv program %d: %d jednotky, %d slov, R0-R%d; j0 %x %x/%x z %x %x %x / %x %x %x", slot, units, gFpgN,
            gFpgMaxR, env[0].mode, env[0].comb[0], env[0].comb[1], env[0].src[0][0], env[0].src[0][1],
            env[0].src[0][2], env[0].op[0][0], env[0].op[0][1], env[0].op[0][2]);
-        lg("  j0 alfa z %x %x %x / %x %x %x, farba %f %f %f %f", env[0].src[1][0], env[0].src[1][1], env[0].src[1][2],
-           env[0].op[1][0], env[0].op[1][1], env[0].op[1][2], (double)env[0].color[0], (double)env[0].color[1],
-           (double)env[0].color[2], (double)env[0].color[3]);
+        lg("  j0 alfa z %x %x %x / %x %x %x, farba %f %f %f %f, mierka %f %f", env[0].src[1][0], env[0].src[1][1],
+           env[0].src[1][2], env[0].op[1][0], env[0].op[1][1], env[0].op[1][2], (double)env[0].color[0],
+           (double)env[0].color[1], (double)env[0].color[2], (double)env[0].color[3], (double)env[0].scale[0],
+           (double)env[0].scale[1]);
         if (units == 2)
             lg("  j1 %x %x/%x z %x %x %x / %x %x %x", env[1].mode, env[1].comb[0], env[1].comb[1], env[1].src[0][0],
                env[1].src[0][1], env[1].src[0][2], env[1].op[0][0], env[1].op[0][1], env[1].op[0][2]);

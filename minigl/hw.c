@@ -484,10 +484,12 @@ static void tnl_state(const HwState *st)
  *   MOVH H0, R3; END
  * Argumenty s OPERAND 1−x a konštanty (TEXTURE_ENV_COLOR) idú najprv do R4–R6 (jedna inline konštanta
  * a jeden vstup na inštrukciu). Výsledok H0 vidia combiners ako TEXTURE0, final combiner ho berie priamo.
- * Programy v VRAM od fpOffset + FPG_BASE, 64 miest po 512 B (kľúč = stav prostredia). */
+ * Programy v VRAM od fpOffset + FPG_BASE, kruh miest po 256 B (kľúč = použitý stav prostredia).
+ * max-6: konštanta (TEXTURE_ENV_COLOR) je v programe → Max Payne mení farbu ~8× za snímku; miesto sa
+ * prepíše až po dokončení snímky, v ktorej sa naposledy použilo (REF_CNT), nie s hw_sync (max-5). */
 #define FPG_BASE    0x400
-#define FPG_SLOT    0x200
-#define FPG_N       64
+#define FPG_SLOT    0x100
+#define FPG_N       ((0x10000 - FPG_BASE) / FPG_SLOT)
 #define FPG_KEYW    48
 
 #define FO_MOV  0x01
@@ -502,8 +504,9 @@ typedef struct FSrc { int type, reg, neg; NVU32 swz; float c[4]; } FSrc;   /* ty
 static NVU32 gFpg[160];
 static int gFpgN, gFpgMaxR, gFpgLast, gFpgOver;
 static NVU32 gFpgKey[FPG_N][FPG_KEYW], gFpgCtl[FPG_N];
+static NVU32 gFpgFrame[FPG_N], gFpgHash[FPG_N];
 static int gFpgUsed, gFpgNext, gFpgLastSlot = -1;
-NVU32 gFpgEvict;
+NVU32 gFpgEvict, gFpgNew;
 
 /* vstup (a[col0], a[texN]) sa udáva v slove 0 inštrukcie, v zdroji len typ a swizzle (kFpTex 0x1c9dc801) */
 static NVU32 fsrc_word(const FSrc *x)
@@ -736,14 +739,19 @@ static NVU32 fpg_get(const HwEnvUnit *env, int units, NVU32 *ctl)
     NVU32 key[FPG_KEYW];
     FSrc r3;
     int i, slot, u;
+    NVU32 h = 0;
     fpg_key(env, units, key);
-    if (gFpgLastSlot >= 0 && !memcmp_w(gFpgKey[gFpgLastSlot], key, FPG_KEYW)) {
+    for (i = 0; i < FPG_KEYW; i++)
+        h = (h << 5) + (h >> 27) + key[i];
+    if (gFpgLastSlot >= 0 && gFpgHash[gFpgLastSlot] == h && !memcmp_w(gFpgKey[gFpgLastSlot], key, FPG_KEYW)) {
+        gFpgFrame[gFpgLastSlot] = gFrame;
         *ctl = gFpgCtl[gFpgLastSlot];
         return FPG_BASE + (NVU32)gFpgLastSlot * FPG_SLOT;
     }
     for (i = 0; i < gFpgUsed; i++)
-        if (!memcmp_w(gFpgKey[i], key, FPG_KEYW)) {
+        if (gFpgHash[i] == h && !memcmp_w(gFpgKey[i], key, FPG_KEYW)) {
             gFpgLastSlot = i;
+            gFpgFrame[i] = gFrame;
             *ctl = gFpgCtl[i];
             return FPG_BASE + (NVU32)i * FPG_SLOT;
         }
@@ -776,22 +784,39 @@ static NVU32 fpg_get(const HwEnvUnit *env, int units, NVU32 *ctl)
         *ctl = 0;
         return 0;
     }
+    gFpgNew++;
     if (gFpgUsed < FPG_N) {
         slot = gFpgUsed++;
     } else {
         slot = gFpgNext;
         gFpgNext = (gFpgNext + 1) % FPG_N;
-        hw_sync();                                  /* max-5: GPU môže čítať starý program aj z tejto snímky */
-        gFpgEvict++;
+        if (gFpgFrame[slot] >= gFrame || gRefOK != 1) {
+            hw_sync();                              /* kruh sa pretočil v rámci snímky */
+            gFpgEvict++;
+        } else if (gpu_done() < gFpgFrame[slot]) {  /* počkať na snímku, v ktorej sa miesto použilo */
+            NVU32 t0 = TickCount();
+            nva_kickoff(S->a);
+            gFpgEvict++;
+            while (gpu_done() < gFpgFrame[slot])
+                if (TickCount() - t0 > 120) {
+                    hw_sync();
+                    break;
+                }
+        }
     }
     for (i = 0; i < FPG_KEYW; i++)
         gFpgKey[slot][i] = key[i];
+    gFpgHash[slot] = h;
+    gFpgFrame[slot] = gFrame;
     gFpgCtl[slot] = (NVU32)gFpgMaxR / 2;            /* (počet R − 1) / 2 */
     fp_upload(FPG_BASE + (NVU32)slot * FPG_SLOT, gFpg, gFpgN);
     if (gFpgUsed <= 12) {
         lg("texenv program %d: %d jednotky, %d slov, R0-R%d; j0 %x %x/%x z %x %x %x / %x %x %x", slot, units, gFpgN,
            gFpgMaxR, env[0].mode, env[0].comb[0], env[0].comb[1], env[0].src[0][0], env[0].src[0][1],
            env[0].src[0][2], env[0].op[0][0], env[0].op[0][1], env[0].op[0][2]);
+        lg("  j0 alfa z %x %x %x / %x %x %x, farba %f %f %f %f", env[0].src[1][0], env[0].src[1][1], env[0].src[1][2],
+           env[0].op[1][0], env[0].op[1][1], env[0].op[1][2], (double)env[0].color[0], (double)env[0].color[1],
+           (double)env[0].color[2], (double)env[0].color[3]);
         if (units == 2)
             lg("  j1 %x %x/%x z %x %x %x / %x %x %x", env[1].mode, env[1].comb[0], env[1].comb[1], env[1].src[0][0],
                env[1].src[0][1], env[1].src[0][2], env[1].op[0][0], env[1].op[0][1], env[1].op[0][2]);

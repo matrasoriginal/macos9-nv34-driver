@@ -89,7 +89,7 @@ int     hw_state(HwTarget *t, const HwState *st);    /* 0 bez textúry, 1 s text
 void    hw_clear(HwTarget *t, int color, int depth, NVU32 argb, NVU32 zval, const HwState *st);  /* zval Z24S8 */
 void    hw_kick(void);
 int     hw_sync(void);
-extern NVU32 gFpgEvict;                                 /* max-5: prepísané texenv programy */
+extern NVU32 gFpgEvict, gFpgNew;                        /* max-6: texenv programy — čakania, nové */
 void    hw_finish(void);
 void    hw_pend_flush(void);                                /* glFinish: počkať na predošlú snímku */
 int     gl_boot_arg(const char *word);

@@ -3511,7 +3511,7 @@ void gl_frame_stats(void)
         }
         lg("snimky %d: %u.%u fps, ms/snimku: celkom %u.%02u, glEnd %u.%02u (z toho davky %u.%02u, cakanie GPU %u.%02u), swap %u.%02u; "
            "MiniGL spolu %u.%02u ms (glFinish %d× %u.%02u ms); rychla cesta: %d troj., poz. %d, atrib. %d; 2 textury %d troj., T&L %d troj., hmla %d troj., VRAM %d troj. / %d vrch. (cakanie %u); DrawElements %d/%d pomalych (%u.%02u ms); orezanych %d troj. (%u.%02u ms, pas %u.%02u); "
-           "%d troj./snimku, %d davok; nahrati %u (+%u ciastocnych, %u KB), sync %u; tb %u/ms",
+           "%d troj./snimku, %d davok; nahrati %u (+%u ciastocnych, %u KB), sync %u; texenv vymeny %u; tb %u/ms",
            C->frames, fps10 / 10, fps10 % 10,
            ms100(dt, perMs, gIvFrames) / 100, ms100(dt, perMs, gIvFrames) % 100,
            ms100(gTEnd, perMs, gIvFrames) / 100, ms100(gTEnd, perMs, gIvFrames) % 100,
@@ -3529,7 +3529,7 @@ void gl_frame_stats(void)
            gStatClip / gIvFrames, ms100(gTClip, perMs, gIvFrames) / 100, ms100(gTClip, perMs, gIvFrames) % 100,
            (NVU32)gGuard, (NVU32)(gGuard * 100) % 100,
            gStatTris / gIvFrames, gStatBatches / gIvFrames, gHwUploads, gHwSubUploads, gHwUploadBytes >> 10,
-           gHwSyncs, perMs);
+           gHwSyncs, gFpgEvict, perMs);
         gIvTb = now;
         gIvTicks = ticks;
         gIvFrames = 0;

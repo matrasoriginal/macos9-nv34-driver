@@ -503,6 +503,7 @@ static NVU32 gFpg[160];
 static int gFpgN, gFpgMaxR, gFpgLast, gFpgOver;
 static NVU32 gFpgKey[FPG_N][FPG_KEYW], gFpgCtl[FPG_N];
 static int gFpgUsed, gFpgNext, gFpgLastSlot = -1;
+NVU32 gFpgEvict;
 
 /* vstup (a[col0], a[texN]) sa udáva v slove 0 inštrukcie, v zdroji len typ a swizzle (kFpTex 0x1c9dc801) */
 static NVU32 fsrc_word(const FSrc *x)
@@ -682,6 +683,37 @@ static void fpg_norm(const HwEnvUnit *in, HwEnvUnit *e)
     }
 }
 
+/* max-5: počet argumentov operácie */
+static int fpg_nargs(GLenum comb)
+{
+    return comb == GL_REPLACE ? 1 : comb == 0x8575 ? 3 : 2;
+}
+
+/* max-5: v kľúči len to, čo program naozaj použije (max-4 generoval kvôli zmene nepoužitej
+ * TEXTURE_ENV_COLOR stále nové programy → 64 miest sa prepisovalo počas kreslenia, textúry blikali) */
+static void fpg_canon(HwEnvUnit *e)
+{
+    int p, i, usesConst = 0;
+    e->mode = 0x8570;
+    for (p = 0; p < 2; p++) {
+        int n = fpg_nargs(e->comb[p]);
+        if (e->comb[p] == 0x86AE || e->comb[p] == 0x86AF)
+            e->scale[p] = 1.0f;
+        for (i = n; i < 3; i++)
+            e->src[p][i] = e->op[p][i] = 0;
+        for (i = 0; i < n; i++)
+            if (e->src[p][i] == 0x8576)
+                usesConst = 1;
+    }
+    if (e->comb[0] == 0x86AF) {                     /* DOT3_RGBA: alfa sa nepočíta */
+        e->comb[1] = 0;
+        for (i = 0; i < 3; i++)
+            e->src[1][i] = e->op[1][i] = 0;
+    }
+    if (!usesConst)
+        e->color[0] = e->color[1] = e->color[2] = e->color[3] = 0;
+}
+
 static void fpg_key(const HwEnvUnit *env, int units, NVU32 *k)
 {
     int u, i;
@@ -691,6 +723,7 @@ static void fpg_key(const HwEnvUnit *env, int units, NVU32 *k)
         HwEnvUnit e;
         const NVU32 *w;
         fpg_norm(&env[u], &e);
+        fpg_canon(&e);
         w = (const NVU32 *)&e;
         for (i = 0; i < (int)(sizeof(e) / 4) && 1 + u * 23 + i < FPG_KEYW; i++)
             k[1 + u * 23 + i] = w[i];
@@ -748,7 +781,8 @@ static NVU32 fpg_get(const HwEnvUnit *env, int units, NVU32 *ctl)
     } else {
         slot = gFpgNext;
         gFpgNext = (gFpgNext + 1) % FPG_N;
-        hw_finish();                                /* GPU ešte môže čítať starý program v tomto mieste */
+        hw_sync();                                  /* max-5: GPU môže čítať starý program aj z tejto snímky */
+        gFpgEvict++;
     }
     for (i = 0; i < FPG_KEYW; i++)
         gFpgKey[slot][i] = key[i];

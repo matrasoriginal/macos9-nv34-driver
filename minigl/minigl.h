@@ -134,6 +134,7 @@ int     hw_tex_resident(HwTex *t);                      /* 0 = treba nahrať (no
 extern HwTex *gTexPin;                                  /* q3-12: túto textúru nevyhadzovať (druhá jednotka sa práve nahráva) */
 int     hw_tex_subupload(HwTex *t, int x, int y, int w, int h, const void *src, int stride, int srcfmt);
 extern NVU32 gHwUploads, gHwUploadBytes, gHwSubUploads, gHwSyncs;
+extern NVU32 gTUpl, gTEvict, gFrUplN, gFrUplB;
 
 /* časovanie (opt-2): časová základňa PPC */
 static inline NVU32 tb(void) { NVU32 v; __asm__ volatile("mftb %0" : "=r"(v)); return v; }

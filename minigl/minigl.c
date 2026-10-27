@@ -978,8 +978,34 @@ static void store_row(TexObj *t, int level, int x0, int y, int w, const GLubyte 
 
 static GLint gProxyW, gProxyH, gProxyFmt;
 
+/* max-14: čas glTexImage2D/glTexSubImage2D (prevod do RAM kópie) za snímku */
+static NVU32 gTConv, gFrTexImgN, gFrTexImgB;
+
+static void tex_image(GLenum target, GLint level, GLint internal, GLsizei w, GLsizei h, GLint border,
+                      GLenum format, GLenum type, const GLvoid *pixels);
+static void tex_sub_image(GLenum target, GLint level, GLint xo, GLint yo, GLsizei w, GLsizei h,
+                          GLenum format, GLenum type, const GLvoid *pixels);
+
 void glTexImage2D(GLenum target, GLint level, GLint internal, GLsizei w, GLsizei h, GLint border,
                   GLenum format, GLenum type, const GLvoid *pixels)
+{
+    NVU32 t0 = tb();
+    tex_image(target, level, internal, w, h, border, format, type, pixels);
+    gTConv += tb() - t0;
+    gFrTexImgN++;
+    gFrTexImgB += (NVU32)w * h * 4;
+}
+
+void glTexSubImage2D(GLenum target, GLint level, GLint xo, GLint yo, GLsizei w, GLsizei h,
+                     GLenum format, GLenum type, const GLvoid *pixels)
+{
+    NVU32 t0 = tb();
+    tex_sub_image(target, level, xo, yo, w, h, format, type, pixels);
+    gTConv += tb() - t0;
+}
+
+static void tex_image(GLenum target, GLint level, GLint internal, GLsizei w, GLsizei h, GLint border,
+                      GLenum format, GLenum type, const GLvoid *pixels)
 {
     TexObj *t;
     GLenum base;
@@ -1043,8 +1069,8 @@ void glTexImage2D(GLenum target, GLint level, GLint internal, GLsizei w, GLsizei
     t->dirty = 1;
 }
 
-void glTexSubImage2D(GLenum target, GLint level, GLint xo, GLint yo, GLsizei w, GLsizei h,
-                     GLenum format, GLenum type, const GLvoid *pixels)
+static void tex_sub_image(GLenum target, GLint level, GLint xo, GLint yo, GLsizei w, GLsizei h,
+                          GLenum format, GLenum type, const GLvoid *pixels)
 {
     TexObj *t;
     GLenum base;
@@ -3593,12 +3619,20 @@ static void frame_trace(void)
         static int nCut;
         static NVU32 lastTb;
         NVU32 now = tb();
-        if (gFrClears >= 4 && (gFrClearMask & 0x4000) && nCut < 400) {
+        static NVU32 lastGL;
+        NVU32 dt = now - lastTb, dgl = gTGL >= lastGL ? gTGL - lastGL : gTGL;
+        int cut = gFrClears >= 4 && (gFrClearMask & 0x4000);
+        /* max-14: cutscény a každá pomalá snímka (nad 45 ms) s rozpisom textúr */
+        if (lastTb && (cut || dt > 45 * 18432) && nCut < 400) {
             nCut++;
-            lg("cutscena snimka %d: %u troj., prekrytia %u× najvyssia alfa %x (textura %u), chyby GL %u (%x), %u us",
-               C->frames, tris, gFrOvlN, gFrOvlMax, gFrOvlC, gFrErrN, gFrErr, (now - lastTb) / 18);
+            lg("%s snimka %d: %u ms (MiniGL %u ms; glTexImage %u× %u KB %u ms; VRAM zapis %u× %u KB %u ms, uvolnenie %u ms), "
+               "%u troj., prekrytia %u× alfa %x",
+               cut ? "cutscena" : "pomala", C->frames, dt / 18432, dgl / 18432, gFrTexImgN, gFrTexImgB >> 10,
+               gTConv / 18432, gFrUplN, gFrUplB >> 10, gTUpl / 18432, gTEvict / 18432, tris, gFrOvlN, gFrOvlMax);
         }
         lastTb = now;
+        lastGL = gTGL;
+        gTConv = gFrTexImgN = gFrTexImgB = gTUpl = gTEvict = gFrUplN = gFrUplB = 0;
         gFrOvlN = gFrOvlMax = gFrOvlC = gFrErrN = gFrErr = 0;
     }
     if (gDump && --gDump == 0)

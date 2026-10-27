@@ -125,6 +125,7 @@ static void dataf(float f)           { union { float f; NVU32 u; } c; c.f = f; i
 
 void hw_kick(void)  { if (S) nva_kickoff(S->a); }
 NVU32 gHwUploads, gHwUploadBytes, gHwSubUploads, gHwSyncs;
+NVU32 gTUpl, gTEvict, gFrUplN, gFrUplB;            /* max-14: čas zápisu textúr do VRAM, uvoľňovania */
 NVU32 gTEnd, gTFlush, gTWait, gTSwap;
 
 static int gVbOn = -1, gVbUsed;
@@ -1527,7 +1528,16 @@ void hw_tex_free(HwTex *t)
 }
 
 /* VRAM pre textúru; pri nedostatku uvoľní najdlhšie nepoužité (dáta sú v RAM v GL vrstve) */
+static NVU32 alloc_evict_(HwTex *t, NVU32 size);
+
 static NVU32 alloc_evict(HwTex *t, NVU32 size)
+{
+    NVU32 t0 = tb(), r = alloc_evict_(t, size);
+    gTEvict += tb() - t0;
+    return r;
+}
+
+static NVU32 alloc_evict_(HwTex *t, NVU32 size)
 {
     NVU32 off = S->vramAlloc(size, 256);
     if (!off && gPendN) {
@@ -1569,7 +1579,7 @@ int hw_tex_resident(HwTex *t)
 /* fmt: 0x06 A8R8G8B8, 0x02 A1R5G5B5, 0x04 A4R4G4B4 */
 int hw_tex_upload(HwTex *t, int w, int h, int levels, void *const *pix, int fmt, int srcfmt)
 {
-    NVU32 size = 0, lw = log2i(w), lh = log2i(h), x, y, bpp = fmt == 0x06 ? 4 : 2;
+    NVU32 size = 0, lw = log2i(w), lh = log2i(h), x, y, bpp = fmt == 0x06 ? 4 : 2, t0;
     int lv, cw = w, ch = h;
     volatile NVU8 *dst;
 
@@ -1619,6 +1629,7 @@ int hw_tex_upload(HwTex *t, int w, int h, int levels, void *const *pix, int fmt,
     dst = S->a->vram + t->off;
     cw = w;
     ch = h;
+    t0 = tb();
     for (lv = 0; lv < levels; lv++) {
         const NVU32 *src = (const NVU32 *)pix[lv];
         for (x = 0; x < (NVU32)cw; x++)
@@ -1653,6 +1664,9 @@ int hw_tex_upload(HwTex *t, int w, int h, int levels, void *const *pix, int fmt,
         if (ch > 1) { ch >>= 1; lh--; }
     }
     __asm__ volatile("sync" ::: "memory");
+    gTUpl += tb() - t0;
+    gFrUplN++;
+    gFrUplB += size;
     gEpoch++;
     gHwUploads++;
     gHwUploadBytes += size;

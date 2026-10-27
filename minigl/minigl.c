@@ -3101,10 +3101,13 @@ static NVU32 ub(float f)
     return (NVU32)(f * 255.0f + 0.5f);
 }
 
+static int gClrHw = -1;
+
 void glClear(GLbitfield mask)
 {
     HwState st;
     NVU32 argb, z;
+    int color;
     GLS *s;
 
     CHECK();
@@ -3134,8 +3137,40 @@ void glClear(GLbitfield mask)
     } else {
         z = (NVU32)(s->clearDepth * 16777215.0 + 0.5) << 8;
     }
-    hw_clear(&C->rt, (mask & GL_COLOR_BUFFER_BIT) != 0, (mask & GL_DEPTH_BUFFER_BIT) && C->depthBits > 0 && s->depthMask,
-             argb, z, &st);
+    color = (mask & GL_COLOR_BUFFER_BIT) != 0;
+    /* max-16: farebný clear so scissorom (letterbox Max Payne) ako obdĺžnik — CLEAR_BUFFERS so scissorom
+     * po niektorých dávkach zmazal celú obrazovku (cutscény čierne). nv34glclrhw = pôvodný clear */
+    if (gClrHw < 0)
+        gClrHw = gl_boot_arg("nv34glclrhw");
+    if (color && st.scissor && !gClrHw) {
+        if (st.sw > 0 && st.sh > 0 && st.colorMask) {
+            HwState q = st;
+            HwVtx v[6];
+            float x0 = (float)st.sx, y0 = (float)st.sy, x1 = x0 + st.sw, y1 = y0 + st.sh;
+            NVU32 c = pack_rgba(s->clearColor[0], s->clearColor[1], s->clearColor[2], s->clearColor[3]);
+            int i;
+            q.tex = q.tex1 = 0;
+            q.env = 0;
+            q.blend = q.alphaTest = q.depthTest = q.depthWrite = q.fog = q.tnl = q.cull = 0;
+            q.mv = 0;
+            memset(v, 0, sizeof(v));
+            v[0].x = x0; v[0].y = y0;
+            v[1].x = x1; v[1].y = y0;
+            v[2].x = x1; v[2].y = y1;
+            v[3].x = x0; v[3].y = y0;
+            v[4].x = x1; v[4].y = y1;
+            v[5].x = x0; v[5].y = y1;
+            for (i = 0; i < 6; i++) {
+                v[i].r = s->clearColor[0]; v[i].g = s->clearColor[1]; v[i].b = s->clearColor[2];
+                v[i].a = s->clearColor[3]; v[i].q = 1.0f; v[i].c = c;
+            }
+            if (hw_state(&C->rt, &q) >= 0)
+                hw_draw(5, v, 6, 0);
+        }
+        color = 0;
+        ONCE(0x5C700000, "glClear farby so scissorom: kreslim obdlznik (nv34glclrhw = hardverovy clear)");
+    }
+    hw_clear(&C->rt, color, (mask & GL_DEPTH_BUFFER_BIT) && C->depthBits > 0 && s->depthMask, argb, z, &st);
 }
 
 void glHint(GLenum target, GLenum mode) { (void)target; (void)mode; }

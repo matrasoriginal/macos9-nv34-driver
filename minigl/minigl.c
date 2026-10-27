@@ -2603,6 +2603,18 @@ static int draw_tris_vb(GLsizei count, GLenum type, const GLvoid *idx, TexObj *t
             gIdx[i] = vb ? gVSlot[k] : (NVU16)k;
         }
     }
+    if (gDump && st.blend && count > 0) {
+        int k = (type == GL_UNSIGNED_BYTE ? ((const GLubyte *)idx)[0] :
+                 type == GL_UNSIGNED_SHORT ? ((const GLushort *)idx)[0] : (GLint)((const GLuint *)idx)[0]) - gLcBase;
+        const HwVtx *w = &gLV[k];
+        const HwEnvUnit *e = &C->env[0];
+        lg("    %d idx, v0 farba %x (pole %d, aktualna %f %f %f %f) poz %f %f %f st %f %f; j0 %x %x/%x z %x %x %x / %x %x %x "
+           "alfa z %x %x %x / %x %x %x",
+           (int)count, w->c, C->ca.on, (double)C->cur[0], (double)C->cur[1], (double)C->cur[2], (double)C->cur[3],
+           (double)w->x, (double)w->y, (double)w->z, (double)w->sq, (double)w->tq, e->mode, e->comb[0], e->comb[1],
+           e->src[0][0], e->src[0][1], e->src[0][2], e->op[0][0], e->op[0][1], e->op[0][2], e->src[1][0], e->src[1][1],
+           e->src[1][2], e->op[1][0], e->op[1][1], e->op[1][2]);
+    }
     t0 = tb();
     if (vb) {
         off = hw_vb_end((NVU32)nv * wpv * 4);
@@ -3565,12 +3577,12 @@ static void frame_trace(void)
     if (gDump && --gDump == 0)
         lg("==== koniec vypisu");
     /* max-10: len cutscény — farebný glClear aspoň 4× za snímku (letterbox), nie portály v hre */
-    if (!gDump && gDumpN < 6 && C->frames > 100 && gFrClears >= 4 && (gFrClearMask & 0x4000) &&
-        C->frames - gDumpLast >= 40) {
+    if (!gDump && gDumpN < 8 && C->frames > 100 && gFrClears >= 4 && (gFrClearMask & 0x4000) &&
+        C->frames - gDumpLast >= (gDumpN < 5 ? 8 : 60)) {
         gDumpN++;
         gDumpLast = C->frames;
-        gDump = 2;
-        lg("==== vypis snimok %d-%d (predosla: %u troj., glClear %u×)", C->frames + 1, C->frames + 2, tris, gFrClears);
+        gDump = 1;
+        lg("==== vypis snimky %d (predosla: %u troj., glClear %u×)", C->frames + 1, tris, gFrClears);
     }
     gFrVpOdd = 0;
     gFrClears = gFrClearMask = gFrFlush = gFrFinish = gFrRead = 0;

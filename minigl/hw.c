@@ -1010,7 +1010,7 @@ int hw_state(HwTarget *t, const HwState *st)
 /* max-11: pokusy na blikanie cutscén (letterbox maže farbu so scissorom na konci snímky)
  * nv34glnobars = farebný clear so scissorom vynechať, nv34glclrwait = po farebnom cleare hw_sync,
  * nv34glpresync = hw_sync pred blitom do obrazovky */
-static int gNoBars = -1, gClrWait, gPreSync;
+static int gNoBars = -1, gClrWait, gPreSync, gClrInv;
 
 static void clr_args(void)
 {
@@ -1018,6 +1018,7 @@ static void clr_args(void)
         gNoBars = gl_boot_arg("nv34glnobars");
         gClrWait = gl_boot_arg("nv34glclrwait");
         gPreSync = gl_boot_arg("nv34glpresync");
+        gClrInv = gl_boot_arg("nv34glclrinv");      /* max-15: pred clearom so scissorom všetok stav znova */
         if (gNoBars || gClrWait || gPreSync)
             lg("pokusy: nobars %d, clrwait %d, presync %d", gNoBars, gClrWait, gPreSync);
     }
@@ -1029,6 +1030,8 @@ void hw_clear(HwTarget *t, int color, int depth, NVU32 argb, NVU32 zval, const H
     clr_args();
     if (gNoBars && st->scissor)
         color = 0;
+    if (gClrInv && st->scissor)
+        invalidate();
     if (!hw_bind(t))
         return;
     set_scissor(t, st);

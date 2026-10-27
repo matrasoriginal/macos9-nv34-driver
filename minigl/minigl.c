@@ -1447,6 +1447,8 @@ static int gPBn, gPBprim;
 static TexObj *gPBtex, *gPBtex1;
 static int gPBtnl;                              /* q3-16: dávka v súradniciach objektu (HW T&L) */
 static float gTnlMat[16];                       /* zložená matica okno × MVP po riadkoch */
+static int gTnlBad, gNoSkipBad = -1;
+static NVU32 gTnlBadN;
 static float gTnlMV[16];                        /* hmla: MODELVIEW (po riadkoch) pre vzdialenosť v oku */
 static NVU32 gTnlGen, gTnlXf;
 static int gTnlRtH;
@@ -1607,6 +1609,10 @@ void gl_flush_batch(void)
     NVU32 t0;
     if (!gPBn || !C)
         return;
+    if (gPBtnl && gTnlBad) {
+        gPBn = 0;
+        return;
+    }
     t0 = tb();
     textured = batch_prepare(&st);
     if (textured < 0) {
@@ -2407,6 +2413,23 @@ static void tnl_matrix(void)
         gTnlMat[8 + c] = dd * col[2] + tz * col[3];
         gTnlMat[12 + c] = col[3];
     }
+    /* max-15: matica s nekonečnom/obrovskými prvkami (Max Payne: odlesky v cutscénach, prvky ≥ 2e6) —
+     * GL by také vrcholy orezal, GPU z nich robí nezmysly → dávky s ňou sa nekreslia */
+    gTnlBad = 0;
+    for (c = 0; c < 16; c++)
+        if (!(gTnlMat[c] < 1e7f && gTnlMat[c] > -1e7f))
+            gTnlBad = 1;
+    if (gTnlBad) {
+        if (gNoSkipBad < 0)
+            gNoSkipBad = gl_boot_arg("nv34glnoskipbad");
+        if (gNoSkipBad)
+            gTnlBad = 0;
+        ONCE(0x5C600000, "T&L matica s obrovskymi prvkami (x %d / %d, y %d / %d, w %d) - davky sa %s",
+             (int)(gTnlMat[3] / 1e6f), (int)(gTnlMat[0] / 1e6f), (int)(gTnlMat[7] / 1e6f), (int)(gTnlMat[5] / 1e6f),
+             (int)(gTnlMat[15] / 1e6f), gNoSkipBad ? "kreslia (nv34glnoskipbad)" : "vynechavaju");
+        if (gTnlBad)
+            gTnlBadN++;
+    }
     mv = C->mstack[0][C->msp[0]];
     for (c = 0; c < 4; c++) {
         gTnlMV[c] = mv[c * 4];
@@ -2586,6 +2609,8 @@ static int draw_tris_vb(GLsizei count, GLenum type, const GLvoid *idx, TexObj *t
     GLsizei i;
 
     count -= count % 3;
+    if (gTnlBad)
+        return 1;
     if (count > IDX_MAX)
         return 0;
     useVb = hw_vb_ready();
@@ -3626,19 +3651,20 @@ static void frame_trace(void)
         if (lastTb && (cut || dt > 45 * 18432) && nCut < 400) {
             nCut++;
             lg("%s snimka %d: %u ms (MiniGL %u ms; glTexImage %u× %u KB %u ms; VRAM zapis %u× %u KB %u ms, uvolnenie %u ms), "
-               "%u troj., prekrytia %u× alfa %x",
+               "%u troj., prekrytia %u× alfa %x, zla matica %u×",
                cut ? "cutscena" : "pomala", C->frames, dt / 18432, dgl / 18432, gFrTexImgN, gFrTexImgB >> 10,
-               gTConv / 18432, gFrUplN, gFrUplB >> 10, gTUpl / 18432, gTEvict / 18432, tris, gFrOvlN, gFrOvlMax);
+               gTConv / 18432, gFrUplN, gFrUplB >> 10, gTUpl / 18432, gTEvict / 18432, tris, gFrOvlN, gFrOvlMax, gTnlBadN);
         }
         lastTb = now;
         lastGL = gTGL;
+        gTnlBadN = 0;
         gTConv = gFrTexImgN = gFrTexImgB = gTUpl = gTEvict = gFrUplN = gFrUplB = 0;
         gFrOvlN = gFrOvlMax = gFrOvlC = gFrErrN = gFrErr = 0;
     }
     if (gDump && --gDump == 0)
         lg("==== koniec vypisu");
     /* max-10: len cutscény — farebný glClear aspoň 4× za snímku (letterbox), nie portály v hre */
-    if (!gDump && gDumpN < 1 && C->frames > 100 && gFrClears >= 4 && (gFrClearMask & 0x4000) &&
+    if (!gDump && gDumpN < 0 && C->frames > 100 && gFrClears >= 4 && (gFrClearMask & 0x4000) &&
         C->frames - gDumpLast >= (gDumpN < 5 ? 8 : 60)) {
         gDumpN++;
         gDumpLast = C->frames;

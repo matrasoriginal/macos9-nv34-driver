@@ -1111,11 +1111,17 @@ void glGetTexLevelParameterfv(GLenum target, GLint level, GLenum pname, GLfloat 
     *v = (GLfloat)i;
 }
 
+/* max-8: priebeh snímok pre cutscény — glClear/glFlush/glFinish/glDrawBuffer za snímku,
+ * zápis do logu len pri zmene vzoru (frame_trace) */
+static NVU32 gFrClears, gFrClearMask, gFrClearArgb, gFrFlush, gFrFinish, gFrRead, gFrDrawBuf = GL_BACK;
+static NVU32 gFrTris0, gTrSig = 0xffffffff;
+static int gTrN;
+
 /* stencil buffer nemáme (AGL_STENCIL_SIZE 0) — bez účinku */
-void glClearStencil(GLint s) { (void)s; }
-void glStencilMask(GLuint m) { (void)m; }
-void glStencilFunc(GLenum f, GLint r, GLuint m) { (void)f; (void)r; (void)m; }
-void glStencilOp(GLenum a, GLenum b, GLenum c) { (void)a; (void)b; (void)c; }
+void glClearStencil(GLint s) { ONCE(0x5C000001, "glClearStencil %d (bez stencilu)", s); }
+void glStencilMask(GLuint m) { ONCE(0x5C000002, "glStencilMask %x (bez stencilu)", m); }
+void glStencilFunc(GLenum f, GLint r, GLuint m) { ONCE(0x5C000003, "glStencilFunc %x %d %x (bez stencilu)", f, r, m); }
+void glStencilOp(GLenum a, GLenum b, GLenum c) { ONCE(0x5C000004, "glStencilOp %x %x %x (bez stencilu)", a, b, c); }
 
 void glBlendEquation(GLenum m)
 {
@@ -2897,6 +2903,7 @@ void glDepthRange(GLclampd n, GLclampd f)
 void glColorMask(GLboolean r, GLboolean g, GLboolean b, GLboolean a)
 {
     CHECK();
+    ONCE(0x5C100000 | (r << 3) | (g << 2) | (b << 1) | a, "glColorMask %d %d %d %d", r, g, b, a);
     FLUSH();
     C->s.cmask[0] = r; C->s.cmask[1] = g; C->s.cmask[2] = b; C->s.cmask[3] = a;
 }
@@ -2990,6 +2997,9 @@ void glClear(GLbitfield mask)
         st.sh = s->scissor[3];
     }
     argb = (ub(s->clearColor[3]) << 24) | (ub(s->clearColor[0]) << 16) | (ub(s->clearColor[1]) << 8) | ub(s->clearColor[2]);
+    gFrClears++;
+    gFrClearMask |= mask;
+    gFrClearArgb = argb;
     if (C->rt.z16) {
         NVU32 v = (NVU32)(s->clearDepth * 65535.0 + 0.5);
         z = (v << 16) | v;
@@ -3001,8 +3011,12 @@ void glClear(GLbitfield mask)
 }
 
 void glHint(GLenum target, GLenum mode) { (void)target; (void)mode; }
-void glDrawBuffer(GLenum mode) { (void)mode; }
-void glReadBuffer(GLenum mode) { (void)mode; }
+void glDrawBuffer(GLenum mode)
+{
+    ONCE(0x5C200000 | (mode & 0xffff), "glDrawBuffer %x (ignorovane)", mode);
+    gFrDrawBuf = mode;
+}
+void glReadBuffer(GLenum mode) { ONCE(0x5C300000 | (mode & 0xffff), "glReadBuffer %x (ignorovane)", mode); }
 void glPointSize(GLfloat s) { (void)s; }
 void glLineWidth(GLfloat w) { (void)w; }
 
@@ -3142,6 +3156,7 @@ void glPopAttrib(void)
 void glFlush(void)
 {
     CHECK();
+    gFrFlush++;
     FLUSH();
     hw_kick();
 }
@@ -3149,6 +3164,7 @@ void glFlush(void)
 void glFinish(void)
 {
     CHECK();
+    gFrFinish++;
     if (gDbg)
         lg("glFinish");
     FLUSH();
@@ -3308,6 +3324,8 @@ void glReadPixels(GLint x, GLint y, GLsizei w, GLsizei h, GLenum format, GLenum 
 {
     if (gDbg)
         lg("glReadPixels %d %d %dx%d", x, y, w, h);
+    ONCE(0x5C400000, "glReadPixels %d %d %dx%d (prvykrat)", x, y, w, h);
+    gFrRead++;
     int comps = comps_of(format), i, j;
     long al, stride;
     GLubyte *row;
@@ -3478,7 +3496,37 @@ static void cpu_props(void)
     lg("uzol CPU v Name Registry nenajdeny");
 }
 
+static void frame_trace(void)
+{
+    NVU32 tris = gStatTris >= gFrTris0 ? gStatTris - gFrTris0 : gStatTris, sig;
+    sig = (tris == 0 ? 0 : tris < 100 ? 1 : tris < 1000 ? 2 : 3) | (gFrClears > 7 ? 7 : gFrClears) << 2 |
+          (gFrClearMask & 0x4100 ? 1 : 0) << 5 | (gFrClearMask & 0x0100 ? 1 : 0) << 6 | (gFrFlush ? 1 : 0) << 7 |
+          (gFrFinish ? 1 : 0) << 8 | (gFrRead ? 1 : 0) << 9 | (gFrDrawBuf & 0xfff) << 10 |
+          ((gFrClearArgb ^ (gFrClearArgb >> 8) ^ (gFrClearArgb >> 16)) & 0xff) << 22;
+    if (sig != gTrSig && gTrN < 600) {
+        gTrN++;
+        lg("priebeh snimka %d: %u troj., glClear %u× maska %x farba %x, glFlush %u, glFinish %u, glReadPixels %u, "
+           "glDrawBuffer %x, viewport %d %d %d %d, hlbka %d, blend %d",
+           C->frames, tris, gFrClears, gFrClearMask, gFrClearArgb, gFrFlush, gFrFinish, gFrRead,
+           gFrDrawBuf, C->s.viewport[0], C->s.viewport[1], C->s.viewport[2], C->s.viewport[3], C->s.depthTest,
+           C->s.blend);
+    }
+    gTrSig = sig;
+    gFrClears = gFrClearMask = gFrFlush = gFrFinish = gFrRead = 0;
+}
+
+static void frame_stats_iv(void);
+
 void gl_frame_stats(void)
+{
+    if (!C)
+        return;
+    frame_trace();
+    frame_stats_iv();
+    gFrTris0 = gStatTris;
+}
+
+static void frame_stats_iv(void)
 {
     NVU32 now = tb(), ticks = TickCount();
     if (!C)

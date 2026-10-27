@@ -604,6 +604,8 @@ GLboolean aglEnable(void *ctx, GLenum pname)
     GLCtx *c = (GLCtx *)ctx;
     if (!ctx_ok(c))
         return fail(AGL_BAD_CONTEXT);
+    if (first_time(0x63000000 | pname))
+        lg("aglEnable %d", pname);
     if (pname == AGL_SWAP_RECT)
         c->swapRectOn = 1;
     return GL_TRUE;

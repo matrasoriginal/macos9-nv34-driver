@@ -171,7 +171,7 @@ static void file_put(const char *s, long n)
     FSSpec spec;
     OSErr e;
 
-    if (gLogLines >= (gDbg ? 30000 : 4000))
+    if (gLogLines >= (gDbg ? 30000 : 12000))
         return;
     gLogLines++;
     if (FindFolder(-32768, kPreferencesFolderType, true, &vref, &dir) != noErr)
@@ -1543,6 +1543,20 @@ static int batch_prepare(HwState *st)
                (double)m[2], (double)m[3], (double)m[4], (double)m[5], (double)m[6], (double)m[7], (double)m[8],
                (double)m[9], (double)m[10], (double)m[11], (double)m[12], (double)m[13], (double)m[14], (double)m[15]);
         }
+        NVU32 k = (NVU32)st->blend ^ st->blendSrc << 1 ^ st->blendDst << 5 ^ (NVU32)st->alphaTest << 9 ^
+                  (NVU32)st->depthTest << 10 ^ (NVU32)st->depthWrite << 11 ^ st->depthFunc << 12 ^ st->colorMask ^
+                  (NVU32)st->sx << 3 ^ (NVU32)st->sy << 13 ^ (NVU32)st->sw << 7 ^ (NVU32)st->sh << 17 ^
+                  (NVU32)st->tnl << 30 ^ (NVU32)(gPBn > 0) << 31 ^ (NVU32)(gPBtex != 0) << 29 ^ C->s.texEnv;
+        static NVU32 lastK;
+        static int same;
+        if (k == lastK) {
+            same++;
+            return hw_state(&C->rt, st);
+        }
+        if (same)
+            lg("  (+%d rovnakych davok)", same);
+        same = 0;
+        lastK = k;
         lg("  davka n %d prim %d tnl %d tex %u/%u env %x blend %d %x/%x alfa %d %x %f z %d/%d %x maska %x orez %d %d %d %d "
            "farba0 %f %f %f %f",
            gPBn, gPBprim, st->tnl, gPBtex ? gPBtex->name : 0, gPBtex1 ? gPBtex1->name : 0, C->s.texEnv, st->blend,
@@ -2552,7 +2566,8 @@ static int draw_tris_vb(GLsizei count, GLenum type, const GLvoid *idx, TexObj *t
     gPBtnl = 1;
     gPBprim = 5;
     textured = batch_prepare(&st);
-    DLOG("  ^ DrawElements %d indexov, vysledok %d", (int)count, textured);
+    if (textured < 0)
+        DLOG("  ^ DrawElements %d indexov sa nekresli (textura)", (int)count);
     if (textured < 0)
         return 1;
     if (!useVb && !hw_gather_ok())
@@ -3549,11 +3564,13 @@ static void frame_trace(void)
     gTrSig = sig;
     if (gDump && --gDump == 0)
         lg("==== koniec vypisu");
-    if (!gDump && gDumpN < 8 && ((gFrVpOdd && C->frames - gDumpLast >= 150) || C->frames == 600)) {
+    /* max-10: len cutscény — farebný glClear aspoň 4× za snímku (letterbox), nie portály v hre */
+    if (!gDump && gDumpN < 6 && C->frames > 100 && gFrClears >= 4 && (gFrClearMask & 0x4000) &&
+        C->frames - gDumpLast >= 40) {
         gDumpN++;
         gDumpLast = C->frames;
         gDump = 2;
-        lg("==== vypis snimok %d-%d (viewport mimo celej vysky %d)", C->frames + 1, C->frames + 2, gFrVpOdd);
+        lg("==== vypis snimok %d-%d (predosla: %u troj., glClear %u×)", C->frames + 1, C->frames + 2, tris, gFrClears);
     }
     gFrVpOdd = 0;
     gFrClears = gFrClearMask = gFrFlush = gFrFinish = gFrRead = 0;

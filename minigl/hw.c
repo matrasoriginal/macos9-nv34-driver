@@ -1006,9 +1006,28 @@ int hw_state(HwTarget *t, const HwState *st)
     return mode;
 }
 
+/* max-11: pokusy na blikanie cutscén (letterbox maže farbu so scissorom na konci snímky)
+ * nv34glnobars = farebný clear so scissorom vynechať, nv34glclrwait = po farebnom cleare hw_sync,
+ * nv34glpresync = hw_sync pred blitom do obrazovky */
+static int gNoBars = -1, gClrWait, gPreSync;
+
+static void clr_args(void)
+{
+    if (gNoBars < 0) {
+        gNoBars = gl_boot_arg("nv34glnobars");
+        gClrWait = gl_boot_arg("nv34glclrwait");
+        gPreSync = gl_boot_arg("nv34glpresync");
+        if (gNoBars || gClrWait || gPreSync)
+            lg("pokusy: nobars %d, clrwait %d, presync %d", gNoBars, gClrWait, gPreSync);
+    }
+}
+
 void hw_clear(HwTarget *t, int color, int depth, NVU32 argb, NVU32 zval, const HwState *st)
 {
     NVU32 bits = 0;
+    clr_args();
+    if (gNoBars && st->scissor)
+        color = 0;
     if (!hw_bind(t))
         return;
     set_scissor(t, st);
@@ -1032,6 +1051,8 @@ void hw_clear(HwTarget *t, int color, int depth, NVU32 argb, NVU32 zval, const H
     if (bits) {
         begin(M_CLEAR_BUFFERS, 1);
         data(bits);
+        if (gClrWait && (bits & 0xF0))
+            hw_sync();
     }
 }
 
@@ -1738,6 +1759,9 @@ void hw_present(HwTarget *t, GDHandle gd, const Rect *dst, RgnHandle clip)
     }
     if (gDbg)
         lg("  present: blit (2D povrch %u bpp)", S->a->depth);
+    clr_args();
+    if (gPreSync)
+        hw_sync();
     if (!clip || !*clip || (*clip)->rgnSize == 10) {
         if (clip && *clip) {
             Rect *bb = &(*clip)->rgnBBox;

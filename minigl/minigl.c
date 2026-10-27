@@ -297,6 +297,10 @@ void stub_hit(const char *name, NVU32 idx)
 }
 
 #define ONCE(key, ...) do { if (first_time(key)) lg(__VA_ARGS__); } while (0)
+
+/* max-9: podrobný výpis celej snímky (cutscény s letterboxom) — gDump = počet snímok */
+static int gDump, gDumpN, gDumpLast, gFrVpOdd;
+#define DLOG(...) do { if (gDump) lg(__VA_ARGS__); } while (0)
 /* q3-8: celkový čas vo funkciách MiniGL (vnorené volania sa nerátajú dvakrát) — atribút cleanup
  * zavolá gl_leave pri každom výstupe z funkcie */
 static int gGlDepth;
@@ -374,12 +378,14 @@ static void mult(const float *m)
 void glMatrixMode(GLenum mode)
 {
     CHECK();
+    DLOG("  glMatrixMode %x", mode);
     C->matrixMode = mode;
 }
 
 void glLoadIdentity(void)
 {
     CHECK();
+    DLOG("  glLoadIdentity");
     mat_ident(top());
     mat_changed();
 }
@@ -387,6 +393,8 @@ void glLoadIdentity(void)
 void glLoadMatrixf(const GLfloat *m)
 {
     CHECK();
+    DLOG("  glLoadMatrixf %f %f %f %f / %f %f %f %f", (double)m[0], (double)m[5], (double)m[10], (double)m[11],
+         (double)m[12], (double)m[13], (double)m[14], (double)m[15]);
     memcpy(top(), m, 64);
     mat_changed();
 }
@@ -492,6 +500,7 @@ void glFrustum(GLdouble l, GLdouble r, GLdouble b, GLdouble t, GLdouble n, GLdou
 {
     float m[16];
     CHECK();
+    DLOG("  glFrustum %f %f %f %f %f %f", l, r, b, t, n, f);
     memset(m, 0, sizeof(m));
     m[0] = (float)(2 * n / (r - l));
     m[5] = (float)(2 * n / (t - b));
@@ -507,6 +516,7 @@ void glOrtho(GLdouble l, GLdouble r, GLdouble b, GLdouble t, GLdouble n, GLdoubl
 {
     float m[16];
     CHECK();
+    DLOG("  glOrtho %f %f %f %f %f %f", l, r, b, t, n, f);
     mat_ident(m);
     m[0] = (float)(2 / (r - l));
     m[5] = (float)(2 / (t - b));
@@ -1524,6 +1534,22 @@ static int batch_prepare(HwState *st)
     }
     memset(st, 0, sizeof(*st));
     fill_state(st, gPBtex);
+    if (gDump) {
+        static NVU32 lastGen;
+        if (st->tnl && st->matGen != lastGen) {
+            const float *m = st->mat;
+            lastGen = st->matGen;
+            lg("  T&L matica %f %f %f %f / %f %f %f %f / %f %f %f %f / %f %f %f %f", (double)m[0], (double)m[1],
+               (double)m[2], (double)m[3], (double)m[4], (double)m[5], (double)m[6], (double)m[7], (double)m[8],
+               (double)m[9], (double)m[10], (double)m[11], (double)m[12], (double)m[13], (double)m[14], (double)m[15]);
+        }
+        lg("  davka n %d prim %d tnl %d tex %u/%u env %x blend %d %x/%x alfa %d %x %f z %d/%d %x maska %x orez %d %d %d %d "
+           "farba0 %f %f %f %f",
+           gPBn, gPBprim, st->tnl, gPBtex ? gPBtex->name : 0, gPBtex1 ? gPBtex1->name : 0, C->s.texEnv, st->blend,
+           st->blendSrc, st->blendDst, st->alphaTest, st->alphaFunc, (double)st->alphaRef, st->depthTest,
+           st->depthWrite, st->depthFunc, st->colorMask, st->sx, st->sy, st->sw, st->sh, (double)gPB[0].r,
+           (double)gPB[0].g, (double)gPB[0].b, (double)gPB[0].a);
+    }
     return hw_state(&C->rt, st);
 }
 
@@ -2526,6 +2552,7 @@ static int draw_tris_vb(GLsizei count, GLenum type, const GLvoid *idx, TexObj *t
     gPBtnl = 1;
     gPBprim = 5;
     textured = batch_prepare(&st);
+    DLOG("  ^ DrawElements %d indexov, vysledok %d", (int)count, textured);
     if (textured < 0)
         return 1;
     if (!useVb && !hw_gather_ok())
@@ -2807,6 +2834,7 @@ static void enable(GLenum cap, int on)
 {
     int *p;
     CHECK();
+    DLOG("  %s %x", on ? "glEnable" : "glDisable", cap);
     if (gTexDbg && gTexDbgN < 3000 && cap == GL_TEXTURE_2D) {
         static int last[2] = { -1, -1 };
         int u = C->unit ? 1 : 0;
@@ -2943,6 +2971,9 @@ void glViewport(GLint x, GLint y, GLsizei w, GLsizei h)
     if (gDbg && (C->s.viewport[0] != x || C->s.viewport[1] != y || C->s.viewport[2] != w || C->s.viewport[3] != h))
         lg("glViewport %d %d %d %d", x, y, w, h);
     FLUSH();
+    DLOG("  glViewport %d %d %d %d", x, y, w, h);
+    if (C->hasRT && h != C->rt.h && h > 0)
+        gFrVpOdd = 1;
     C->s.viewport[0] = x; C->s.viewport[1] = y; C->s.viewport[2] = w; C->s.viewport[3] = h;
     C->viewportSet = 1;
     gXformGen++;
@@ -2952,6 +2983,7 @@ void glScissor(GLint x, GLint y, GLsizei w, GLsizei h)
 {
     CHECK();
     FLUSH();
+    DLOG("  glScissor %d %d %d %d", x, y, w, h);
     C->s.scissor[0] = x; C->s.scissor[1] = y; C->s.scissor[2] = w; C->s.scissor[3] = h;
 }
 
@@ -2998,6 +3030,9 @@ void glClear(GLbitfield mask)
     }
     argb = (ub(s->clearColor[3]) << 24) | (ub(s->clearColor[0]) << 16) | (ub(s->clearColor[1]) << 8) | ub(s->clearColor[2]);
     gFrClears++;
+    DLOG("  glClear %x farba %x z %x scissor %d (%d %d %d %d) viewport %d %d %d %d maska %x", mask, argb,
+         (NVU32)(s->clearDepth * 1000), s->scissorTest, s->scissor[0], s->scissor[1], s->scissor[2], s->scissor[3],
+         s->viewport[0], s->viewport[1], s->viewport[2], s->viewport[3], st.colorMask);
     gFrClearMask |= mask;
     gFrClearArgb = argb;
     if (C->rt.z16) {
@@ -3512,6 +3547,15 @@ static void frame_trace(void)
            C->s.blend);
     }
     gTrSig = sig;
+    if (gDump && --gDump == 0)
+        lg("==== koniec vypisu");
+    if (!gDump && gDumpN < 8 && ((gFrVpOdd && C->frames - gDumpLast >= 150) || C->frames == 600)) {
+        gDumpN++;
+        gDumpLast = C->frames;
+        gDump = 2;
+        lg("==== vypis snimok %d-%d (viewport mimo celej vysky %d)", C->frames + 1, C->frames + 2, gFrVpOdd);
+    }
+    gFrVpOdd = 0;
     gFrClears = gFrClearMask = gFrFlush = gFrFinish = gFrRead = 0;
 }
 

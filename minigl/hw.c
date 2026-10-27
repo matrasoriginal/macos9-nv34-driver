@@ -363,10 +363,9 @@ static int tex_resident(HwTex *t);
 
 static void set_scissor(HwTarget *t, const HwState *st)
 {
-    long key = st->scissor ? (long)((st->sx << 20) ^ (st->sy << 10) ^ (st->sw << 5) ^ st->sh ^ 0x40000000) : 0;
+    static NVU32 lastWH;
+    long key;
     int x = 0, y = 0, w = t->w, h = t->h;
-    if (hwScis == key)
-        return;
     if (st->scissor) {
         x = st->sx; y = st->sy; w = st->sw; h = st->sh;
         if (x < 0) { w += x; x = 0; }
@@ -376,10 +375,15 @@ static void set_scissor(HwTarget *t, const HwState *st)
         if (w < 0) w = 0;
         if (h < 0) h = 0;
     }
+    /* max-9: presný kľúč (predtým hash zo st->sx..sh, mohol sa zraziť) */
+    key = (long)(((NVU32)x << 16) | (NVU32)y);
+    if (hwScis == key && lastWH == (((NVU32)w << 16) | (NVU32)h))
+        return;
     begin(M_SCISSOR_HORIZ, 2);
     data(((NVU32)w << 16) | (NVU32)x);
     data(((NVU32)h << 16) | (NVU32)y);
     hwScis = key;
+    lastWH = ((NVU32)w << 16) | (NVU32)h;
 }
 
 /* textúrová jednotka u (blok metód 0x1a00 + 0x20·u), stav v cTex, cKey, cEpoch */

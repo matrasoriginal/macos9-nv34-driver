@@ -311,8 +311,14 @@ static inline void gl_leave(NVU32 *u) { (void)u; if (--gGlDepth == 0) gTGL += tb
 #define CHECK() GLT; if (!C) return
 #define FLUSH() gl_flush_batch()
 
+/* max-13: prekrytia cez celú obrazovku (blend, hĺbka ALWAYS) a chyby GL za snímku */
+static NVU32 gFrOvlN, gFrOvlC, gFrOvlMax, gFrErr, gFrErrN;
+
 static void set_err(GLenum e)
 {
+    ONCE(0x5C500000 | (e & 0xffff), "chyba GL %x (prvykrat)", e);
+    gFrErr = e;
+    gFrErrN++;
     if (C && C->err == GL_NO_ERROR)
         C->err = e;
 }
@@ -2603,6 +2609,15 @@ static int draw_tris_vb(GLsizei count, GLenum type, const GLvoid *idx, TexObj *t
             gIdx[i] = vb ? gVSlot[k] : (NVU16)k;
         }
     }
+    if (st.blend && st.depthFunc == GL_ALWAYS && count > 0) {
+        int k = (type == GL_UNSIGNED_BYTE ? ((const GLubyte *)idx)[0] :
+                 type == GL_UNSIGNED_SHORT ? ((const GLushort *)idx)[0] : (GLint)((const GLuint *)idx)[0]) - gLcBase;
+        gFrOvlN++;
+        if ((gLV[k].c & 0xff) >= (gFrOvlMax & 0xff)) {
+            gFrOvlMax = gLV[k].c;
+            gFrOvlC = gPBtex ? gPBtex->name : 0;
+        }
+    }
     if (gDump && st.blend && count > 0) {
         int k = (type == GL_UNSIGNED_BYTE ? ((const GLubyte *)idx)[0] :
                  type == GL_UNSIGNED_SHORT ? ((const GLushort *)idx)[0] : (GLint)((const GLuint *)idx)[0]) - gLcBase;
@@ -3574,10 +3589,22 @@ static void frame_trace(void)
            C->s.blend);
     }
     gTrSig = sig;
+    {
+        static int nCut;
+        static NVU32 lastTb;
+        NVU32 now = tb();
+        if (gFrClears >= 4 && (gFrClearMask & 0x4000) && nCut < 400) {
+            nCut++;
+            lg("cutscena snimka %d: %u troj., prekrytia %u× najvyssia alfa %x (textura %u), chyby GL %u (%x), %u us",
+               C->frames, tris, gFrOvlN, gFrOvlMax, gFrOvlC, gFrErrN, gFrErr, (now - lastTb) / 18);
+        }
+        lastTb = now;
+        gFrOvlN = gFrOvlMax = gFrOvlC = gFrErrN = gFrErr = 0;
+    }
     if (gDump && --gDump == 0)
         lg("==== koniec vypisu");
     /* max-10: len cutscény — farebný glClear aspoň 4× za snímku (letterbox), nie portály v hre */
-    if (!gDump && gDumpN < 8 && C->frames > 100 && gFrClears >= 4 && (gFrClearMask & 0x4000) &&
+    if (!gDump && gDumpN < 1 && C->frames > 100 && gFrClears >= 4 && (gFrClearMask & 0x4000) &&
         C->frames - gDumpLast >= (gDumpN < 5 ? 8 : 60)) {
         gDumpN++;
         gDumpLast = C->frames;

@@ -787,6 +787,66 @@ static void cpu_speed(void)
     lg("  -> zmerane %u MHz, aktualna %d, plna %d", gl_cpu_mhz(), cur ? cur() : -1, full ? full() : -1);
 }
 
+/* mohaa-2: zachytenie výnimky procesu (chyba 2 v MOHAA) — PC, LR, DAR a reťaz LR zo zásobníka
+ * sa uložia v handleri a zapíšu do logu až v MiniGLTerm (File Manager v handleri nie je bezpečný).
+ * Typy podľa MachineExceptions.h (Retro68 ich nemá). */
+typedef struct { NVU32 hi, lo; } XWide;
+typedef struct { XWide CTR, LR, PC; NVU32 CR, XER, MSR, MQ, kind, DSISR; XWide DAR, res; } XMachine;
+typedef struct { XWide R[32]; } XRegs;
+typedef struct { NVU32 area; NVU32 addr; long err; NVU32 ref; } XMemInfo;
+typedef struct { NVU32 theKind; XMachine *m; XRegs *r; void *fpu; XMemInfo *mem; void *vec; } XInfo;
+typedef long (*XHandler)(XInfo *);
+extern pascal XHandler InstallExceptionHandler(XHandler h);
+
+static XHandler gPrevExc;
+static int gExcInst;
+static NVU32 gExcN, gExcKind, gExcPC, gExcLR, gExcDAR, gExcDSISR, gExcMemAddr, gExcR[32], gExcChain[8];
+
+static long exc_handler(XInfo *x)
+{
+    if (gExcN++ == 0 && x && x->m) {
+        NVU32 sp, i;
+        gExcKind = x->theKind;
+        gExcPC = x->m->PC.lo;
+        gExcLR = x->m->LR.lo;
+        gExcDAR = x->m->DAR.lo;
+        gExcDSISR = x->m->DSISR;
+        gExcMemAddr = x->mem ? x->mem->addr : 0;
+        if (x->r)
+            for (i = 0; i < 32; i++)
+                gExcR[i] = x->r->R[i].lo;
+        sp = gExcR[1];
+        for (i = 0; i < 8; i++) {                    /* reťaz rámcov: [sp] = predošlý sp, [sp+8] = uložený LR */
+            NVU32 next;
+            if (!sp || (sp & 3) || sp - gExcR[1] > 0x100000)
+                break;
+            next = *(volatile NVU32 *)sp;
+            if (next <= sp || (next & 3))
+                break;
+            gExcChain[i] = *(volatile NVU32 *)(next + 8);
+            sp = next;
+        }
+    }
+    if (gPrevExc)
+        return gPrevExc(x);
+    return -1;                                      /* nevybavené: ďalej systému */
+}
+
+static void exc_report(void)
+{
+    int i;
+    if (!gExcN)
+        return;
+    lg("VYNIMKA %u×: druh %u, PC %x, LR %x, DAR %x, DSISR %x, adresa %x; MiniGL kod: gl_draw_fps na %x, aglSwapBuffers na %x",
+       gExcN, gExcKind, gExcPC, gExcLR, gExcDAR, gExcDSISR, gExcMemAddr,
+       *(NVU32 *)(void *)gl_draw_fps, *(NVU32 *)(void *)aglSwapBuffers);
+    for (i = 0; i < 32; i += 8)
+        lg("  r%d-r%d: %x %x %x %x %x %x %x %x", i, i + 7, gExcR[i], gExcR[i + 1], gExcR[i + 2], gExcR[i + 3],
+           gExcR[i + 4], gExcR[i + 5], gExcR[i + 6], gExcR[i + 7]);
+    lg("  zasobnik LR: %x %x %x %x %x %x %x %x", gExcChain[0], gExcChain[1], gExcChain[2], gExcChain[3],
+       gExcChain[4], gExcChain[5], gExcChain[6], gExcChain[7]);
+}
+
 OSErr MiniGLInit(void *initBlock)
 {
     ProcessSerialNumber psn;
@@ -805,12 +865,21 @@ OSErr MiniGLInit(void *initBlock)
     lg("==== NV34 MiniGL 1: nacitana v procese \"%s\", NV34 %s, 3D stav %u", (char *)name + 1,
        shared() ? "ano" : "nie", S ? S->state3D : 0);
     cpu_speed();
+    if (!gl_boot_arg("nv34glnoexc")) {
+        gPrevExc = InstallExceptionHandler(exc_handler);
+        gExcInst = 1;
+    }
     return noErr;
 }
 
 void MiniGLTerm(void)
 {
     int i;
+    if (gExcInst) {
+        InstallExceptionHandler(gPrevExc);          /* kód knižnice sa uvoľní — handler vrátiť */
+        gExcInst = 0;
+    }
+    exc_report();
     if (!S)
         return;
     hw_sync();

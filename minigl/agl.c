@@ -572,6 +572,29 @@ GLboolean aglConfigure(GLenum pname, GLuint param)
     return GL_TRUE;
 }
 
+/* fps-1: obmedzenie snímok za sekundu (predvolene 60) — nad 60 fps hry reagovali na myš
+ * oneskorene; nv34glfps30 = 30 fps, nv34glfps75 = 75 fps, nv34glnofps = bez obmedzenia */
+static NVU32 gFpsPeriod = 1, gFpsNext;
+
+static void fps_limit(void)
+{
+    NVU32 now;
+    if (gFpsPeriod == 1) {
+        int fps = gl_boot_arg("nv34glnofps") ? 0 : gl_boot_arg("nv34glfps30") ? 30 :
+                  gl_boot_arg("nv34glfps75") ? 75 : 60;
+        gFpsPeriod = fps ? 18432000u / fps : 0;     /* timebase 18,432 MHz */
+        lg("obmedzenie fps: %d (0 = bez obmedzenia)", fps);
+    }
+    if (!gFpsPeriod)
+        return;
+    now = tb();
+    if ((int)(now - gFpsNext) > (int)gFpsPeriod || (int)(gFpsNext - now) > (int)gFpsPeriod)
+        gFpsNext = now;                             /* prvá snímka alebo veľké oneskorenie: znova od teraz */
+    while ((int)(gFpsNext - now) > 0)
+        now = tb();
+    gFpsNext += gFpsPeriod;
+}
+
 void aglSwapBuffers(void *ctx)
 {
     GLCtx *c = (GLCtx *)ctx;
@@ -584,6 +607,7 @@ void aglSwapBuffers(void *ctx)
         gl_flush_batch();
     if (!c->port || !update_geom(c) || !c->hasRT)
         return;
+    fps_limit();
     if (c->full) {
         /* hl-11: celé okno vrátane miesta panela menu / control stripu (visRgn ich vynecháva) */
         hw_present(&c->rt, c->gd, &c->global, 0);

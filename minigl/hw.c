@@ -1734,6 +1734,26 @@ static void blit(HwTarget *t, PixMapPtr pm, const Rect *dst, long l, long tp, lo
                   (int)(l - pm->bounds.left), (int)(tp - pm->bounds.top), (int)(r - l), (int)(b - tp));
 }
 
+/* fps-1: oneskorená myš nad 60 fps — CPU nesmie predbehnúť GPU o viac ako jednu snímku
+ * (inak sa snímky hromadia v push buffri a obraz zaostáva za vstupom);
+ * nv34glqueue = bez obmedzenia (ako predtým) */
+static int gQueue = -1;
+
+static void present_throttle(void)
+{
+    NVU32 t0;
+    if (gQueue < 0)
+        gQueue = gl_boot_arg("nv34glqueue");
+    if (gQueue || gRefOK != 1)
+        return;
+    t0 = TickCount();
+    while (gpu_done() + 2 < gFrame)                 /* hotová musí byť aspoň predchádzajúca snímka */
+        if (TickCount() - t0 > 120) {
+            hw_sync();
+            break;
+        }
+}
+
 void hw_present(HwTarget *t, GDHandle gd, const Rect *dst, RgnHandle clip)
 {
     PixMapPtr pm = *(*gd)->gdPMap;
@@ -1782,4 +1802,5 @@ void hw_present(HwTarget *t, GDHandle gd, const Rect *dst, RgnHandle clip)
         ref_emit(gFrame - 1);                       /* snímka gFrame − 1 odoslaná celá */
     pend_process(0);
     nva_kickoff(S->a);
+    present_throttle();
 }

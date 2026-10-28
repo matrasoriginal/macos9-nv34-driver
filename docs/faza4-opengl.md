@@ -709,3 +709,6 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
   `nv34glnofps`) a po odoslaní snímky čaká, kým GPU dokončí predchádzajúcu (`nv34glqueue` =
   bez čakania). **Výsledok fps-2: obmedzenie funguje (~55–57 fps), myš reaguje hneď.**
   Pozor: `make -C minigl` vyrobí len MiniGL.pef — `OpenGLLibrary` balí až `make apps` v koreni.
+- fps-3: pevný rozvrh (oneskorenie do 4 periód sa dobehne). Menu Max Payne 58,8 fps (v okne
+  aj jeden prechod, čakanie 14,3 ms/snímku), myš bez oneskorenia; v hre ~25 fps — hra sama
+  pomalšia ako 60, obmedzenie nečaká (cakanie 0,00 ms).

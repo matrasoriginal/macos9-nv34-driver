@@ -239,6 +239,7 @@ void    gl_ctx_init(GLCtx *c);
 void    gl_flush_batch(void);
 NVU32   vram_total(void);
 void    gl_frame_stats(void);
+void    gl_draw_fps(void);                          /* fps-4: počítadlo v rohu (nv34glshowfps) */
 void    gl_stats_init(void);
 extern int gDbg;                            /* hl-3: podrobný log (Half-Life) */
 void    gl_release_textures(void);

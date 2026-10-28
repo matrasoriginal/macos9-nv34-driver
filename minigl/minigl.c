@@ -3148,6 +3148,86 @@ void glClear(GLbitfield mask)
     hw_clear(&C->rt, color, (mask & GL_DEPTH_BUFFER_BIT) && C->depthBits > 0 && s->depthMask, argb, z, &st);
 }
 
+/* fps-4: počítadlo fps v ľavom hornom rohu (nv34glshowfps) — číslice 3×5 z obdĺžnikov
+ * na čiernom pozadí, kreslené do zadného bufferu tesne pred výmenou */
+static const unsigned short gDigit[10] = {      /* 5 riadkov po 3 bity, horný riadok v bitoch 14..12 */
+    0x7B6F, 0x2C97, 0x73E7, 0x73CF, 0x5BC9, 0x79CF, 0x79EF, 0x7249, 0x7BEF, 0x7BCF
+};
+static int gShowFps = -1;
+static NVU32 gFpsShown, gFpsTb, gFpsFrames;
+
+static int fps_quad(HwVtx *v, float x0, float y0, float x1, float y1, NVU32 c)
+{
+    float k = (c & 0xFF000000) ? 1.0f : 0.0f;
+    int i;
+    memset(v, 0, 6 * sizeof(HwVtx));
+    v[0].x = x0; v[0].y = y0;
+    v[1].x = x1; v[1].y = y0;
+    v[2].x = x1; v[2].y = y1;
+    v[3].x = x0; v[3].y = y0;
+    v[4].x = x1; v[4].y = y1;
+    v[5].x = x0; v[5].y = y1;
+    for (i = 0; i < 6; i++) {
+        v[i].r = v[i].g = v[i].b = k;
+        v[i].a = 1.0f; v[i].q = 1.0f; v[i].c = c;
+    }
+    return 6;
+}
+
+void gl_draw_fps(void)
+{
+    enum { PX = 2, MAXD = 4 };
+    static HwVtx v[6 + MAXD * 15 * 6];
+    HwState q;
+    char d[MAXD];
+    NVU32 now = tb(), f;
+    int nd = 0, n = 0, i, row, col;
+
+    if (gShowFps < 0) {
+        gShowFps = gl_boot_arg("nv34glshowfps");
+        if (gShowFps)
+            lg("pocitadlo fps zapnute (nv34glshowfps)");
+    }
+    if (!gShowFps || !C || !C->hasRT)
+        return;
+    gFpsFrames++;
+    if (!gFpsTb || now - gFpsTb > 18432u * 2000) {          /* prvé volanie alebo dlhá pauza */
+        gFpsTb = now;
+        gFpsFrames = 0;
+    } else if (now - gFpsTb >= 18432u * 500) {              /* obnova každú pol sekundu */
+        gFpsShown = (NVU32)((double)gFpsFrames * 18432000.0 / (now - gFpsTb) + 0.5);
+        gFpsTb = now;
+        gFpsFrames = 0;
+    }
+    f = gFpsShown > 9999 ? 9999 : gFpsShown;
+    do {
+        d[nd++] = (char)(f % 10);
+        f /= 10;
+    } while (f && nd < MAXD);
+
+    memset(&q, 0, sizeof(q));
+    fill_state(&q, 0);
+    q.tex = q.tex1 = 0;
+    q.env = 0;
+    q.blend = q.alphaTest = q.depthTest = q.depthWrite = q.fog = q.tnl = q.cull = 0;
+    q.mv = 0;
+    q.scissor = 0;
+    q.colorMask = 0x01010101;
+    /* pozadie: okraj 2 px okolo číslic */
+    n += fps_quad(v + n, 2, 2, (float)(2 + 2 + nd * 4 * PX - PX + 2), (float)(2 + 2 + 5 * PX + 2), 0x000000FF);
+    for (i = 0; i < nd; i++) {
+        unsigned bits = gDigit[(int)d[nd - 1 - i]];
+        float x = (float)(4 + i * 4 * PX);
+        for (row = 0; row < 5; row++)
+            for (col = 0; col < 3; col++)
+                if (bits & (1u << (14 - row * 3 - col)))
+                    n += fps_quad(v + n, x + col * PX, (float)(4 + row * PX),
+                                  x + (col + 1) * PX, (float)(4 + (row + 1) * PX), 0xFFFFFFFF);
+    }
+    if (hw_state(&C->rt, &q) >= 0)
+        hw_draw(5, v, n, 0);
+}
+
 void glHint(GLenum target, GLenum mode) { (void)target; (void)mode; }
 void glDrawBuffer(GLenum mode)
 {

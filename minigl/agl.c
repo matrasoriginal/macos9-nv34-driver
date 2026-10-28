@@ -615,6 +615,8 @@ void aglSwapBuffers(void *ctx)
         gl_flush_batch();
     if (!c->port || !update_geom(c) || !c->hasRT)
         return;
+    if (c == C)
+        gl_draw_fps();
     fps_limit();
     if (c->full) {
         /* hl-11: celé okno vrátane miesta panela menu / control stripu (visRgn ich vynecháva) */

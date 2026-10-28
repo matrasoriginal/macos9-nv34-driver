@@ -704,3 +704,8 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
 - max-16: farebný `glClear` so scissorom sa kreslí ako netextúrovaný obdĺžnik farby clearu
   (bez hĺbky, blendu, T&L); hĺbka a clear celej obrazovky ostávajú hardvérové.
   `nv34glclrhw` = pôvodný hardvérový clear. **Výsledok: cutscény Max Payne fungujú.**
+- fps-1/fps-2: nad 60 fps (Max Payne menu ~137 fps, Half-Life) myš reagovala oneskorene.
+  MiniGL obmedzuje fps v aglSwapBuffers (predvolene 60; `nv34glfps30`, `nv34glfps75`,
+  `nv34glnofps`) a po odoslaní snímky čaká, kým GPU dokončí predchádzajúcu (`nv34glqueue` =
+  bez čakania). **Výsledok fps-2: obmedzenie funguje (~55–57 fps), myš reaguje hneď.**
+  Pozor: `make -C minigl` vyrobí len MiniGL.pef — `OpenGLLibrary` balí až `make apps` v koreni.

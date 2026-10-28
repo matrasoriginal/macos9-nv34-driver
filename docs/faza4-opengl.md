@@ -695,3 +695,12 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
   Kratší vrchol, priamy zápis aj `nv34ravestats`/`nv34ravelong` sú preč (RAVE aj tak tvoril ~3–6 %
   snímky).
 
+- max-8 … max-15 (Max Payne cez MiniGL, hranie OK): cutscény v engine blikali celou obrazovkou
+  na čierno/bielo. Biele záblesky sú vlastný fade hry pri strihu kamery (alfa správna). Čierna:
+  na konci snímky hra maže pásy letterboxu farebným `glClear` so scissorom (0,420,640,60) a
+  (0,0,640,60); hardvérový CLEAR_BUFFERS na NV34 scissor niekedy nedodrží a zmaže celú
+  obrazovku (scénu bolo vidieť len v snímkach, kde sa pred mazaním pásov kreslil fade).
+  Vylúčené: FPG, čakanie na GPU, cache stavu, obrie T&L matice, chyby GL, nahrávanie textúr.
+- max-16: farebný `glClear` so scissorom sa kreslí ako netextúrovaný obdĺžnik farby clearu
+  (bez hĺbky, blendu, T&L); hĺbka a clear celej obrazovky ostávajú hardvérové.
+  `nv34glclrhw` = pôvodný hardvérový clear. **Výsledok: cutscény Max Payne fungujú.**

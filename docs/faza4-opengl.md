@@ -712,3 +712,7 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
 - fps-3: pevný rozvrh (oneskorenie do 4 periód sa dobehne). Menu Max Payne 58,8 fps (v okne
   aj jeden prechod, čakanie 14,3 ms/snímku), myš bez oneskorenia; v hre ~25 fps — hra sama
   pomalšia ako 60, obmedzenie nečaká (cakanie 0,00 ms).
+- mohaa-1/2 (Medal of Honor: Allied Assault): pri 256 MB v Get Info chyba 2 tesne pred koncom
+  nahrávania levelu. Zachytená výnimka: druh 4 (nenamapovaná pamäť), PC 3df506f4 — v kóde hry,
+  nie v MiniGL (MiniGL kód ~4e52e000–4e560000); adresa c219e484 = platný ukazovateľ 4219e484
+  s nastaveným horným bitom → chyba hry pri nedostatku pamäte. S 512 MB sa hra spustí.

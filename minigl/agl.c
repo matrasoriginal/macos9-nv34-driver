@@ -573,12 +573,15 @@ GLboolean aglConfigure(GLenum pname, GLuint param)
 }
 
 /* fps-1: obmedzenie snímok za sekundu (predvolene 60) — nad 60 fps hry reagovali na myš
- * oneskorene; nv34glfps30 = 30 fps, nv34glfps75 = 75 fps, nv34glnofps = bez obmedzenia */
+ * oneskorene; nv34glfps30 = 30 fps, nv34glfps75 = 75 fps, nv34glnofps = bez obmedzenia
+ * fps-3: pevný rozvrh — snímka oneskorená do 4 periód sa dobehne ďalšími (bez čakania),
+ * takže priemer je presne 60; až väčší výpadok (nahrávanie) začne rozvrh znova od teraz */
 static NVU32 gFpsPeriod = 1, gFpsNext;
+NVU32 gTFps, gFpsLate, gFpsReset;
 
 static void fps_limit(void)
 {
-    NVU32 now;
+    NVU32 now, t0;
     if (gFpsPeriod == 1) {
         int fps = gl_boot_arg("nv34glnofps") ? 0 : gl_boot_arg("nv34glfps30") ? 30 :
                   gl_boot_arg("nv34glfps75") ? 75 : 60;
@@ -587,11 +590,16 @@ static void fps_limit(void)
     }
     if (!gFpsPeriod)
         return;
-    now = tb();
-    if ((int)(now - gFpsNext) > (int)gFpsPeriod || (int)(gFpsNext - now) > (int)gFpsPeriod)
-        gFpsNext = now;                             /* prvá snímka alebo veľké oneskorenie: znova od teraz */
+    now = t0 = tb();
+    if ((int)(now - gFpsNext) > (int)(4 * gFpsPeriod) || (int)(gFpsNext - now) > (int)gFpsPeriod) {
+        gFpsNext = now;                             /* prvá snímka alebo veľký výpadok: znova od teraz */
+        gFpsReset++;
+    } else if ((int)(gFpsNext - now) <= 0) {
+        gFpsLate++;                                 /* oneskorená: bez čakania, dobieha rozvrh */
+    }
     while ((int)(gFpsNext - now) > 0)
         now = tb();
+    gTFps += now - t0;
     gFpsNext += gFpsPeriod;
 }
 

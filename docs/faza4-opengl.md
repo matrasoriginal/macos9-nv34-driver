@@ -716,3 +716,6 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
   nahrávania levelu. Zachytená výnimka: druh 4 (nenamapovaná pamäť), PC 3df506f4 — v kóde hry,
   nie v MiniGL (MiniGL kód ~4e52e000–4e560000); adresa c219e484 = platný ukazovateľ 4219e484
   s nastaveným horným bitom → chyba hry pri nedostatku pamäte. S 512 MB sa hra spustí.
+- mohaa-3: MOHAA beží, obraz v poriadku. V náročných scénach 10–17 fps: snímka 85–120 ms pri
+  11–16 tis. trojuholníkoch, z toho MiniGL len 9–15 ms a čakanie na GPU ~0,5 ms → zvyšok
+  (~75–100 ms) je CPU hry. Procesor nameraný ~750 MHz (bez NV34 CPU).

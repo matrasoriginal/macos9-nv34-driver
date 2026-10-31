@@ -853,8 +853,6 @@ OSErr MiniGLInit(void *initBlock)
     ProcessInfoRec info;
     Str31 name;
 
-    (void)initBlock;
-    gl_stats_init();
     name[0] = 0;
     memset(&info, 0, sizeof(info));
     info.processInfoLength = sizeof(info);
@@ -864,6 +862,12 @@ OSErr MiniGLInit(void *initBlock)
     name[name[0] < 31 ? name[0] + 1 : 31] = 0;
     lg("==== NV34 MiniGL 1: nacitana v procese \"%s\", NV34 %s, 3D stav %u", (char *)name + 1,
        shared() ? "ano" : "nie", S ? S->state3D : 0);
+    /* CFragSystem7InitBlock: contextID, closureID, connectionID, fragLocator { where, fileSpec, … } */
+    if (initBlock && (((const NVU32 *)initBlock)[3] == 1 || ((const NVU32 *)initBlock)[3] == 2))
+        gl_cfg_load((const FSSpec *)((const NVU32 *)initBlock)[4]);   /* dátová vetva / zdroj */
+    else
+        lg("config: umiestnenie kniznice nezname");
+    gl_stats_init();
     cpu_speed();
     if (!gl_boot_arg("nv34glnoexc")) {
         gPrevExc = InstallExceptionHandler(exc_handler);

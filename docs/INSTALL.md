@@ -39,6 +39,12 @@ používajú ďalej; naša knižnica platí iba pre hru, v ktorej priečinku le�
 
 Bez `OpenGLLibrary` v priečinku hra použije Apple OpenGL (softvérové, pomalé).
 
+Nastavenia MiniGL sú v súbore **`NV34 MiniGL config`** vedľa `OpenGLLibrary` (funguje aj názov
+`NV34 MiniGL config.txt`). Každé slovo zapne jeden príznak, napr. `showfps` (počítadlo fps),
+`nofps` (bez obmedzenia na 60 fps), `stats` (časy do logu); riadok s `#` sa ignoruje. Zmena
+platí od ďalšieho spustenia hry, bez reštartu. Zoznam príznakov je v súbore. Boot-args
+(`nv34glshowfps` …) fungujú naďalej.
+
 MiniGL podporuje dve textúry naraz (GL_ARB_multitexture) a v `glDrawElements` hardvérovú
 transformáciu (T&L) — polohy vrcholov, orezanie a odvrátené steny počíta GPU.
 

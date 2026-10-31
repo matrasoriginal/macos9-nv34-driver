@@ -719,3 +719,7 @@ knižnicu, ostatné programy ďalej Apple OpenGL.
 - mohaa-3: MOHAA beží, obraz v poriadku. V náročných scénach 10–17 fps: snímka 85–120 ms pri
   11–16 tis. trojuholníkoch, z toho MiniGL len 9–15 ms a čakanie na GPU ~0,5 ms → zvyšok
   (~75–100 ms) je CPU hry. Procesor nameraný ~750 MHz (bez NV34 CPU).
+- cfg-1: príznaky MiniGL aj zo súboru `NV34 MiniGL config` (alebo `.txt`) v priečinku knižnice —
+  cesta z CFM init bloku (CFragSystem7InitBlock → fragLocator.fileSpec). Slová, `#` poznámky,
+  predpona `nv34gl` voliteľná; boot_arg = config ALEBO boot-args. Vzor `minigl/NV34 MiniGL config`
+  (CR, ASCII) ide na obe diskety.

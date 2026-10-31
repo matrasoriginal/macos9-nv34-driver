@@ -98,7 +98,89 @@ static int gMT = 1;                 /* q3-12: GL_ARB_multitexture (boot-args nv3
 static int gNoFpg;                  /* max-4: boot-args nv34glnofpg = texenv bez fragment programov */
 static int gTnl;                    /* q3-16: HW T&L v glDrawElements (q3-17 predvolené, nv34glnotnl = vypnuté) */
 
-static int boot_arg(const char *word)
+/* cfg-1: konfiguračný súbor „NV34 MiniGL config“ vedľa OpenGLLibrary — príznaky bez reštartu
+ * a boot-args. Slová oddelené medzerou alebo novým riadkom, # = poznámka do konca riadku;
+ * predpona nv34gl sa môže vynechať (showfps = nv34glshowfps). Platí boot-arg ALEBO config. */
+#define CFG_MAX 2048
+static char gCfg[CFG_MAX + 1];
+static int gCfgLen = -1;
+
+static int cfg_has(const char *word)
+{
+    int i = 0, j, k;
+    if (gCfgLen <= 0)
+        return 0;
+    while (i < gCfgLen) {
+        while (i < gCfgLen && (gCfg[i] == ' ' || gCfg[i] == '\t' || gCfg[i] == '\r' || gCfg[i] == '\n'))
+            i++;
+        if (i >= gCfgLen)
+            break;
+        if (gCfg[i] == '#') {
+            while (i < gCfgLen && gCfg[i] != '\r' && gCfg[i] != '\n')
+                i++;
+            continue;
+        }
+        j = i;
+        while (j < gCfgLen && gCfg[j] != ' ' && gCfg[j] != '\t' && gCfg[j] != '\r' && gCfg[j] != '\n' && gCfg[j] != '#')
+            j++;
+        for (k = 0; k < 2; k++) {                   /* celé slovo, potom bez predpony nv34gl */
+            const char *w = word + (k ? 6 : 0);
+            int n = 0;
+            if (k && (word[0] != 'n' || word[1] != 'v' || word[2] != '3' || word[3] != '4' || word[4] != 'g' || word[5] != 'l'))
+                break;
+            while (w[n] && i + n < j && gCfg[i + n] == w[n])
+                n++;
+            if (!w[n] && i + n == j)
+                return 1;
+        }
+        i = j;
+    }
+    return 0;
+}
+
+/* spec = súbor knižnice (z CFM init bloku); config hľadať v jeho priečinku */
+void gl_cfg_load(const FSSpec *lib)
+{
+    FSSpec spec;
+    short ref;
+    long n = CFG_MAX;
+    int i, o;
+    char line[120];
+
+    gCfgLen = 0;
+    /* aj s príponou .txt (USB/FAT: File Exchange z nej urobí typ TEXT) */
+    if (!lib || (FSMakeFSSpec(lib->vRefNum, lib->parID, "\pNV34 MiniGL config", &spec) != noErr &&
+                 FSMakeFSSpec(lib->vRefNum, lib->parID, "\pNV34 MiniGL config.txt", &spec) != noErr)) {
+        lg("config: subor \"NV34 MiniGL config\" vedla kniznice nie je, plati len boot-args");
+        return;
+    }
+    if (FSpOpenDF(&spec, fsRdPerm, &ref) != noErr) {
+        lg("config: subor \"NV34 MiniGL config\" vedla kniznice nie je, plati len boot-args");
+        return;
+    }
+    if (FSRead(ref, &n, gCfg) != noErr && n <= 0)
+        n = 0;
+    FSClose(ref);
+    gCfgLen = (int)n;
+    gCfg[gCfgLen] = 0;
+    /* do logu len aktívne slová (bez poznámok) */
+    for (i = 0, o = 0; i < gCfgLen && o < (int)sizeof(line) - 2; i++) {
+        char c = gCfg[i];
+        if (c == '#') {
+            while (i < gCfgLen && gCfg[i] != '\r' && gCfg[i] != '\n')
+                i++;
+            c = ' ';
+        }
+        if (c == '\r' || c == '\n' || c == '\t')
+            c = ' ';
+        if (c != ' ' || (o && line[o - 1] != ' '))
+            line[o++] = c;
+    }
+    line[o] = 0;
+    lg("config: %s", o ? line : "(prazdny)");
+}
+
+static int boot_arg_reg(const char *word)
 {
     RegEntryID opt;
     char args[256];
@@ -117,6 +199,11 @@ static int boot_arg(const char *word)
     }
     RegistryEntryIDDispose(&opt);
     return found;
+}
+
+static int boot_arg(const char *word)
+{
+    return cfg_has(word) || boot_arg_reg(word);
 }
 
 int gl_boot_arg(const char *word)

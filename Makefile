@@ -60,6 +60,8 @@ dist/NV34\ test.dsk: driver apps
 	$(H)/hcopy -m dist/NV34RAVETest.bin ":NV34 RAVE Test"
 	$(H)/hmkdir ":NV34 MiniGL"
 	$(H)/hcopy -m dist/OpenGLLibrary.bin ":NV34 MiniGL:OpenGLLibrary"
+	$(H)/hcopy -r "minigl/NV34 MiniGL config" ":NV34 MiniGL:NV34 MiniGL config"
+	$(H)/hattrib -t TEXT -c ttxt ":NV34 MiniGL:NV34 MiniGL config"
 	$(H)/hdir -l
 	$(H)/humount >/dev/null
 
@@ -89,6 +91,8 @@ release: driver apps
 	$(H)/hcopy -m dist/NV34QD.bin "$(R):Do Extensions:NV34 QD Accel"
 	$(H)/hcopy -m dist/NV34RAVE.bin "$(R):Do Extensions:NV34 RAVE"
 	$(H)/hcopy -m dist/OpenGLLibrary.bin "$(R):Do priecinka hry:OpenGLLibrary"
+	$(H)/hcopy -r "minigl/NV34 MiniGL config" "$(R):Do priecinka hry:NV34 MiniGL config"
+	$(H)/hattrib -t TEXT -c ttxt "$(R):Do priecinka hry:NV34 MiniGL config"
 	$(H)/hcopy -m dist/NV34Info.bin "$(R):Nastroje:NV34 Info"
 	$(H)/hcopy -m dist/NV34GLCheck.bin "$(R):Nastroje:NV34 GL Check"
 	$(H)/hcopy -m dist/NV34DSpTest.bin "$(R):Nastroje:NV34 DSp Test"

@@ -93,6 +93,7 @@ extern NVU32 gFpgEvict, gFpgNew;                        /* max-6: texenv program
 void    hw_finish(void);
 void    hw_pend_flush(void);                                /* glFinish: počkať na predošlú snímku */
 int     gl_boot_arg(const char *word);
+void    gl_cfg_load(const FSSpec *lib);                 /* cfg-1: „NV34 MiniGL config“ vedľa knižnice */
 NVU32   hw_frame(void);
 
 /* vrcholy v súradniciach RT: x, y, z (0..1), farba 0..1, s/q, t/q, q */

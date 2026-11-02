@@ -3808,7 +3808,9 @@ static void frame_trace(void)
           (gFrClearMask & 0x4100 ? 1 : 0) << 5 | (gFrClearMask & 0x0100 ? 1 : 0) << 6 | (gFrFlush ? 1 : 0) << 7 |
           (gFrFinish ? 1 : 0) << 8 | (gFrRead ? 1 : 0) << 9 | (gFrDrawBuf & 0xfff) << 10 |
           ((gFrClearArgb ^ (gFrClearArgb >> 8) ^ (gFrClearArgb >> 16)) & 0xff) << 22;
-    if (sig != gTrSig && gTrN < 600) {
+    /* g1-f4d: bez ladenia len prvých 20 zmien — podpis obsahuje farbu glClear, ktorá sa v Gothicu
+     * mení s oblohou, a každý riadok lg() je otvorenie + zápis + FlushVol (prepad snímky) */
+    if (sig != gTrSig && gTrN < (gDbg ? 600 : 20)) {
         gTrN++;
         lg("priebeh snimka %d: %u troj., glClear %u× maska %x farba %x, glFlush %u, glFinish %u, glReadPixels %u, "
            "glDrawBuffer %x, viewport %d %d %d %d, hlbka %d, blend %d",
@@ -3822,10 +3824,16 @@ static void frame_trace(void)
         static NVU32 lastTb;
         NVU32 now = tb();
         static NVU32 lastGL;
+        static NVU32 avg;                           /* g1-f4d: kĺzavý priemer snímky (1/16) */
         NVU32 dt = now - lastTb, dgl = gTGL >= lastGL ? gTGL - lastGL : gTGL;
         int cut = gFrClears >= 4 && (gFrClearMask & 0x4000);
-        /* max-14: cutscény a každá pomalá snímka (nad 45 ms) s rozpisom textúr */
-        if (lastTb && (cut || dt > 45 * 18432) && nCut < 400) {
+        /* max-14: cutscény a každá pomalá snímka (nad 45 ms) s rozpisom textúr; g1-f4d: pomalé len so
+         * stats/ladením a len nad dvojnásobkom priemeru (G1 beží ~50 ms na snímku — zápis do logu
+         * po každej snímke robil ďalšie prepady) */
+        int slow = dt > 45 * 18432 && (gStatsOn || gDbg) && (!avg || dt > 2 * avg);
+        if (lastTb)
+            avg = avg ? avg - avg / 16 + dt / 16 : dt;
+        if (lastTb && (cut || slow) && nCut < 400) {
             nCut++;
             lg("%s snimka %d: %u ms (MiniGL %u ms; glTexImage %u× %u KB %u ms; VRAM zapis %u× %u KB %u ms, uvolnenie %u ms), "
                "%u troj., prekrytia %u× alfa %x",

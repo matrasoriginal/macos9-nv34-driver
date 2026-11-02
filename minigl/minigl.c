@@ -3808,9 +3808,9 @@ static void frame_trace(void)
           (gFrClearMask & 0x4100 ? 1 : 0) << 5 | (gFrClearMask & 0x0100 ? 1 : 0) << 6 | (gFrFlush ? 1 : 0) << 7 |
           (gFrFinish ? 1 : 0) << 8 | (gFrRead ? 1 : 0) << 9 | (gFrDrawBuf & 0xfff) << 10 |
           ((gFrClearArgb ^ (gFrClearArgb >> 8) ^ (gFrClearArgb >> 16)) & 0xff) << 22;
-    /* g1-f4d: bez ladenia len prvých 20 zmien — podpis obsahuje farbu glClear, ktorá sa v Gothicu
+    /* g1-f4d: bez ladenia len prvá snímka — podpis obsahuje farbu glClear, ktorá sa v Gothicu
      * mení s oblohou, a každý riadok lg() je otvorenie + zápis + FlushVol (prepad snímky) */
-    if (sig != gTrSig && gTrN < (gDbg ? 600 : 20)) {
+    if (sig != gTrSig && gTrN < (gDbg ? 600 : 1)) {
         gTrN++;
         lg("priebeh snimka %d: %u troj., glClear %u× maska %x farba %x, glFlush %u, glFinish %u, glReadPixels %u, "
            "glDrawBuffer %x, viewport %d %d %d %d, hlbka %d, blend %d",

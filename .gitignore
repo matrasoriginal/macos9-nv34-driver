@@ -10,7 +10,7 @@ NVIDIA-v3.1-2002/
 # macOS
 .DS_Store
 
-# development notes (phases) and private test / diagnostic programs — local only
+# development notes (phases), hardware test logs and private test / diagnostic programs — local only
 PLAN.md
 docs/phase*
 nv34info/
@@ -20,3 +20,4 @@ nv34gl/
 nv34glcheck/
 nv34dsptest/
 nv34ravetest/
+logs/

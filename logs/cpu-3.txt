@@ -1,9 +1,0 @@
-
-==== NV34 CPU 2 — 3875774640 s od 1904, 65 s od startu (Option = znizeny takt)
-model "PowerBook6,2"
-zbernica 133120000 / 102000000 Hz, nasobok 15/2 -> 998 / 765 MHz
-pred: 757 MHz (tb), timebase 18430827 Hz podla TickCount -> skutocne 756 MHz, citanie RAM 0 MB/s; frequency-gpio 04, voltage-gpio 04, slewing-done 02
-plny takt: slewing-done po 4528 us
-po: 896 MHz (tb), timebase 18433034 Hz podla TickCount -> skutocne 896 MHz, citanie RAM 0 MB/s; frequency-gpio 07, voltage-gpio 07, slewing-done 02
-o 2 s: 902 MHz (tb), timebase 18433038 Hz podla TickCount -> skutocne 902 MHz, citanie RAM 0 MB/s; frequency-gpio 07, voltage-gpio 07, slewing-done 02
-o 4 s: 897 MHz (tb), timebase 18432813 Hz podla TickCount -> skutocne 897 MHz, citanie RAM 0 MB/s; frequency-gpio 07, voltage-gpio 07, slewing-done 02

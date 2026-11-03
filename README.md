@@ -119,7 +119,6 @@ minigl/        NV34 MiniGL (OpenGL 1.1 + AGL), sample config file
 nv34cpu/       NV34 CPU tool
 tools/         PEF tools, packaging into 'ndrv'/'shlb' files, MacBinary, HFS images, Read Me
 docs/          INSTALL.md
-logs/          logs from test runs on the hardware
 ```
 
 ## Sources and references
@@ -179,3 +178,8 @@ were only examined locally to understand interfaces and are not part of this rep
 
 **Games used for testing**: Unreal Tournament, Quake II, Quake III (MacQuake3), Half-Life (Xash3D FWGS with the
 SDL2 "macosclassic" port), Return to Castle Wolfenstein, Max Payne, Medal of Honor: Allied Assault, Gothic.
+
+## License
+
+MIT — see [LICENSE](LICENSE). The 2D engine in [accel/nv34_accel.c](accel/nv34_accel.c) is derived from
+xf86-video-nv and keeps its original MIT notice (Copyright (c) 2003 NVIDIA Corporation).

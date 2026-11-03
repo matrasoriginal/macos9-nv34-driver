@@ -452,7 +452,7 @@ int main(void)
     }
 
     if (RegistryEntryIterateCreate(&it) != 0) {
-        out("RegistryEntryIterateCreate zlyhal\n");
+        out("RegistryEntryIterateCreate failed\n");
         goto end;
     }
     for (;;) {

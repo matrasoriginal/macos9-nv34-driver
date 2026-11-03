@@ -1,7 +1,7 @@
 /*
- * NV34 MiniGL — hardvérová vrstva (NV30 3D trieda 0x0697, metódy z nv30-40_3d.xml.h, MIT).
- * Vychádza z NV34 RAVE enginu (nv34rave/engine.c): rovnaké render targety (farba aj zeta
- * s rovnakým pitchom), inline vrcholy (VERTEX_DATA), combiners, swizzled textúry, 2D blit.
+ * NV34 MiniGL — hardware layer (NV30 3D class 0x0697, methods from nv30-40_3d.xml.h, MIT).
+ * Based on the NV34 RAVE engine (nv34rave/engine.c): the same render targets (color and zeta
+ * with the same pitch), inline vertices (VERTEX_DATA), combiners, swizzled textures, 2D blit.
  */
 #include <MacMemory.h>
 #include <Events.h>
@@ -47,14 +47,14 @@
 #define M_CLEAR_COLOR_VALUE 0x1d90
 #define M_CLEAR_BUFFERS     0x1d94
 
-/* TXPH H0, a[tex0], t[0]; END (kódovanie pre BE 3D objekt, gl-5) */
+/* TXPH H0, a[tex0], t[0]; END (encoded for the BE 3D object, gl-5) */
 static const NVU32 kFpTex[4] = { 0x18009e81, 0x1c9dc801, 0x0001c800, 0x3fe1c800 };
 
-/* q3-12: dve textúry (GL_MODULATE na jednotke 1), combiners potom × primárna farba ako pri jednej:
+/* q3-12: two textures (GL_MODULATE on unit 1), then combiners × primary color as with one:
  *   TXP R1, a[tex1], t[1]
  *   TXPH H0, a[tex0], t[0]
  *   MULH H0, H0, R1; END
- * Program leží za prvým (fpOffset + FP2_OFF). */
+ * The program lies after the first one (fpOffset + FP2_OFF). */
 #define FP2_OFF 0x100
 static const NVU32 kFpTex2[12] = {
     0x1802be02, 0x1c9dc801, 0x0001c800, 0x3fe1c800,
@@ -62,7 +62,7 @@ static const NVU32 kFpTex2[12] = {
     0x02001e81, 0x1c9dc900, 0x0001c804, 0x3fe1c800,
 };
 
-/* ako nv3d_upload_fp (swapMode 1), na posunutie off */
+/* like nv3d_upload_fp (swapMode 1), at offset off */
 static void fp_upload(NVU32 off, const NVU32 *words, int count)
 {
     volatile NVU32 *dst = (volatile NVU32 *)(S->g->a->vram + S->g->fpOffset + off);
@@ -85,14 +85,14 @@ HwTex *gTexPin;
 static NVU32 gFrame = 1, gEpoch = 1;
 static HwTex *gTexList;
 
-/* posledný nastavený hardvérový stav (-1 = neznámy) */
+/* last hardware state set (-1 = unknown) */
 static long hwMode = -1, hwBlend = -1, hwAlpha = -1, hwDepth = -1, hwMask = -1, hwScis = -1, hwFmt = -1;
 static long hwTex = -1, hwTexKey = -1, hwTexEpoch = -1;
 static long hwTex1 = -1, hwTex1Key = -1, hwTex1Epoch = -1;
 static long hwTnl = -1, hwMatGen = -1, hwCull = -1, hwMv = -1;
 static long hwFin = -1, hwFogOn = -1, hwProg = -1;
 static NVU32 hwFogK[6];
-static int gVtx12 = -1, gColorBE, gCompact;        /* formát vrcholu (opt-5, q3-17) */
+static int gVtx12 = -1, gColorBE, gCompact;        /* vertex format (opt-5, q3-17) */
 static int gNoFog, gFogPlane;
 
 static void invalidate(void)
@@ -104,14 +104,14 @@ static void invalidate(void)
     hwFin = hwFogOn = hwProg = -1;
 }
 
-/* hl-2: ak GPU neodpovedá (timeout pri čakaní na miesto v push buffri), ďalej nič nepísať —
- * zápis za rezervované miesto by prepísal príkazy, ktoré GPU ešte číta */
+/* hl-2: if the GPU does not respond (timeout waiting for room in the push buffer), write nothing more —
+ * writing past the reserved space would overwrite commands the GPU is still reading */
 static int gHwDead;
 
 static void hw_fail(const char *what)
 {
     if (!gHwDead)
-        lg("GPU neodpoveda (%s): GET %x PUT %x, kreslenie vypnute", what, S->a->errGet, S->a->errPut);
+        lg("GPU not responding (%s): GET %x PUT %x, drawing disabled", what, S->a->errGet, S->a->errPut);
     gHwDead = 1;
 }
 
@@ -125,7 +125,7 @@ static void dataf(float f)           { union { float f; NVU32 u; } c; c.f = f; i
 
 void hw_kick(void)  { if (S) nva_kickoff(S->a); }
 NVU32 gHwUploads, gHwUploadBytes, gHwSubUploads, gHwSyncs;
-NVU32 gTUpl, gTEvict, gFrUplN, gFrUplB;            /* max-14: čas zápisu textúr do VRAM, uvoľňovania */
+NVU32 gTUpl, gTEvict, gFrUplN, gFrUplB;            /* max-14: time spent writing textures to VRAM, evicting */
 NVU32 gTEnd, gTFlush, gTWait, gTSwap;
 
 static int gVbOn = -1, gVbUsed;
@@ -138,30 +138,30 @@ int hw_sync(void)
     ok = S && !gHwDead && nva_sync(S->a, 120) == kNVAOK;
     if (S && !ok && !gHwDead && first_time(0x70000000)) {
         NV3DTrap tr;
-        nv3d_trap(S->g, &tr);                       /* q3-19: ktorá metóda GPU zastavila */
-        lg("hw_sync: GPU nedobehol do 2 s; PGRAPH intr %x nsource %x nstatus %x addr %x data %x status %x, "
+        nv3d_trap(S->g, &tr);                       /* q3-19: which method stopped the GPU */
+        lg("hw_sync: GPU did not finish within 2 s; PGRAPH intr %x nsource %x nstatus %x addr %x data %x status %x, "
            "PFIFO intr %x get %x put %x%s", tr.intr, tr.nsource, tr.nstatus, tr.addr, tr.data, tr.status,
-           tr.fifoIntr, tr.dmaGet, tr.dmaPut, gVbUsed ? " (po kresleni z VRAM, vypinam ho)" : "");
+           tr.fifoIntr, tr.dmaGet, tr.dmaPut, gVbUsed ? " (after drawing from VRAM, disabling it)" : "");
         if (gVbUsed)
             gVbOn = 0;
         if (tr.intr)
-            ok = nva_sync(S->a, 120) == kNVAOK;     /* po potvrdení chyby skúsiť dobehnúť */
+            ok = nva_sync(S->a, 120) == kNVAOK;     /* after acknowledging the error try to finish */
     }
     gTWait += tb() - t0;
     return ok;
 }
 NVU32 hw_frame(void) { return gFrame; }
 
-/* hl-10: GPU fence cez REF_CNT kanála (metóda 0x50, čítanie USER + 0x48, ako nouveau nv10_fence).
- * Pri present sa pošle číslo dokončenej snímky; textúru použitú v snímke F možno prepísať na mieste,
- * až keď REF ≥ F (push buffer 512 KB → GPU môže zaostávať o celú snímku; baterka v Half-Life
- * kreslila staré snímky s novými svetelnými mapami = čierne štvorce). */
+/* hl-10: GPU fence via the channel's REF_CNT (method 0x50, read USER + 0x48, like nouveau nv10_fence).
+ * On present the number of the finished frame is sent; a texture used in frame F may be overwritten in place
+ * only once REF ≥ F (512 KB push buffer → the GPU may lag a whole frame behind; the flashlight in Half-Life
+ * drew old frames with new lightmaps = black squares). */
 static int gRefOK = -1;
 
 static NVU32 gpu_done(void)
 {
     if (gRefOK != 1)
-        return gFrame - 1;                          /* bez fence: ako predtým */
+        return gFrame - 1;                          /* no fence: as before */
     return nva_rd32(S->a, 0x800048);
 }
 
@@ -183,17 +183,17 @@ int hw_init(void)
         gRefOK = nva_rd32(S->a, 0x800048) == 0x5A000001;
         ref_emit(0);
         hw_sync();
-        lg("GPU fence (REF_CNT): %s", gRefOK ? "ok" : "nefunguje");
+        lg("GPU fence (REF_CNT): %s", gRefOK ? "ok" : "not working");
         {
-            /* q3-8: takt jadra a pamäte (PLL ako v nouveau nv04_pm / nv30: f = krystal × N / M >> P;
-             * NV31+ môže mať druhý stupeň v *_COEFF_B) — či GPU nebeží v úspornom režime */
+            /* q3-8: core and memory clocks (PLL as in nouveau nv04_pm / nv30: f = crystal × N / M >> P;
+             * NV31+ may have a second stage in *_COEFF_B) — whether the GPU runs in a power-saving mode */
             NVU32 boot = nva_rd32(S->a, 0x101000);
             NVU32 xtal = (boot & 0x40) ? 14318 : 13500;    /* kHz */
             NVU32 n1 = nva_rd32(S->a, 0x680500), n2 = nva_rd32(S->a, 0x680570);
             NVU32 m1 = nva_rd32(S->a, 0x680504), m2 = nva_rd32(S->a, 0x680574);
             NVU32 nm = n1 & 0xff, nn = (n1 >> 8) & 0xff, np = (n1 >> 16) & 7;
             NVU32 mm = m1 & 0xff, mn = (m1 >> 8) & 0xff, mp = (m1 >> 16) & 7;
-            lg("PLL: jadro %x/%x (~%u MHz), pamat %x/%x (~%u MHz), krystal %u kHz", n1, n2,
+            lg("PLL: core %x/%x (~%u MHz), memory %x/%x (~%u MHz), crystal %u kHz", n1, n2,
                nm ? (xtal * nn / nm >> np) / 1000 : 0, m1, m2, mm ? (xtal * mn / mm >> mp) / 1000 : 0, xtal);
         }
     }
@@ -205,9 +205,9 @@ int hw_target_alloc(HwTarget *t, int w, int h, int bpp, int zbits)
     t->w = w;
     t->h = h;
     t->bpp = bpp;
-    /* farba a zeta s rovnakým pitchom (rave-2, rave-16). q3-10: pri 16 bpp a požadovanej hĺbke
-     * ≤ 16 bitov Z16 — polovičný prenos pamäte pri teste hĺbky (Quake III je obmedzený GPU);
-     * boot-args nv34glz24 = vždy Z24S8 */
+    /* color and zeta with the same pitch (rave-2, rave-16). q3-10: at 16 bpp with a requested depth of
+     * ≤ 16 bits Z16 — half the memory traffic for the depth test (Quake III is GPU bound);
+     * boot-args nv34glz24 = always Z24S8 */
     t->z16 = bpp == 16 && zbits > 0 && zbits <= 16 && !gl_boot_arg("nv34glz24");
     t->colorPitch = t->zPitch = (w * (t->z16 ? 2 : 4) + 63) & ~63L;
     t->colorOff = S->vramAlloc(t->colorPitch * h, 4096);
@@ -251,7 +251,7 @@ int hw_bind(HwTarget *t)
     begin(M_RT_HORIZ, 5);
     data(t->w << 16);
     data(t->h << 16);
-    data((t->bpp == 16 ? 0x102 : 0x108) | (t->z16 ? 0x20 : 0x40));   /* farba | Z16/Z24S8 | linear */
+    data((t->bpp == 16 ? 0x102 : 0x108) | (t->z16 ? 0x20 : 0x40));   /* color | Z16/Z24S8 | linear */
     data((t->zPitch << 16) | t->colorPitch);
     data(t->colorOff);
     begin(0x0214, 1);
@@ -267,7 +267,7 @@ int hw_bind(HwTarget *t)
     dataf(1); dataf(1); dataf(1); dataf(0);
     begin(M_FP_ACTIVE_PROGRAM, 1);
     data(S->g->fpOffset | 1);
-    begin(M_DMA_VTXBUF0, 1);                        /* q3-18: vrcholy vo VRAM (VTXBUF bez bitu 31) */
+    begin(M_DMA_VTXBUF0, 1);                        /* q3-18: vertices in VRAM (VTXBUF without bit 31) */
     data(NV3D_HANDLE_VRAM);
     begin(M_FP_CONTROL, 1);
     data(0);
@@ -275,13 +275,13 @@ int hw_bind(HwTarget *t)
     data(0x0001000f);
     begin(M_TEX_MATRIX_ENABLE, 1);
     data(0);
-    begin(M_CULL_FACE_ENABLE, 1);                  /* orezanie odvrátených stien robí CPU */
+    begin(M_CULL_FACE_ENABLE, 1);                  /* back-face culling is done by the CPU */
     data(0);
-    begin(M_DEPTH_CONTROL, 1);                      /* hĺbku obmedziť, neorezávať */
+    begin(M_DEPTH_CONTROL, 1);                      /* clamp depth, do not clip */
     data(0x10);
     begin(M_DITHER_ENABLE, 1);
     data(t->bpp == 16);
-    if (fresh) {                                    /* prvý CLEAR hĺbky po inite nezaberie (rave-3) */
+    if (fresh) {                                    /* the first depth CLEAR after init does not take (rave-3) */
         begin(M_DEPTH_WRITE, 1);
         data(1);
         begin(M_CLEAR_DEPTH_VALUE, 1);
@@ -294,15 +294,15 @@ int hw_bind(HwTarget *t)
     return 1;
 }
 
-/* opt-5: pozícia 3×float (w = 1), farba 4×U8_UNORM v jednom slove, textúra 4×float →
- * 8 slov na vrchol s textúrou (predtým 12), 4 bez nej (predtým 8). boot-args nv34glvtx12 =
- * pôvodný formát. Farba R<<24|G<<16|B<<8|A (opt-6 s opačným poradím mala ružový nádych);
- * nv34glcolorle = opačné poradie. */
+/* opt-5: position 3×float (w = 1), color 4×U8_UNORM in one word, texture 4×float →
+ * 8 words per textured vertex (previously 12), 4 without (previously 8). boot-args nv34glvtx12 =
+ * the original format. Color R<<24|G<<16|B<<8|A (opt-6 with the reverse order had a pink tint);
+ * nv34glcolorle = reverse order. */
 static void vtx_init(void)
 {
     if (gVtx12 < 0) {
         gVtx12 = gl_boot_arg("nv34glvtx12");
-        gColorBE = !gl_boot_arg("nv34glcolorle");   /* opt-7: GPU číta R v najvyššom bajte */
+        gColorBE = !gl_boot_arg("nv34glcolorle");   /* opt-7: the GPU reads R in the top byte */
         gNoFog = gl_boot_arg("nv34glnofog");
         gFogPlane = gl_boot_arg("nv34glfogplane");
     }
@@ -326,7 +326,7 @@ static void set_vtxfmt(int tex)
                  (i == 8 && tex) ? (0x2 | (2u << 4) | st) :
                  (i == 9 && tex == 2) ? (0x2 | (2u << 4) | st) : 0x2);
     } else {
-        NVU32 st = (tex == 2 ? 48u : tex ? 32u : 16u) << 8;   /* q3-12: 2 textúry = 12 slov */
+        NVU32 st = (tex == 2 ? 48u : tex ? 32u : 16u) << 8;   /* q3-12: 2 textures = 12 words */
         for (i = 0; i < 16; i++)
             data(i == 0 ? (0x2 | (3u << 4) | st) :           /* V32_FLOAT × 3 */
                  i == 3 ? (0x4 | (4u << 4) | st) :           /* U8_UNORM × 4 */
@@ -376,7 +376,7 @@ static void set_scissor(HwTarget *t, const HwState *st)
         if (w < 0) w = 0;
         if (h < 0) h = 0;
     }
-    /* max-9: presný kľúč (predtým hash zo st->sx..sh, mohol sa zraziť) */
+    /* max-9: exact key (previously a hash of st->sx..sh, could collide) */
     key = (long)(((NVU32)x << 16) | (NVU32)y);
     if (hwScis == key && lastWH == (((NVU32)w << 16) | (NVU32)h))
         return;
@@ -387,7 +387,7 @@ static void set_scissor(HwTarget *t, const HwState *st)
     lastWH = ((NVU32)w << 16) | (NVU32)h;
 }
 
-/* textúrová jednotka u (blok metód 0x1a00 + 0x20·u), stav v cTex, cKey, cEpoch */
+/* texture unit u (method block 0x1a00 + 0x20·u), state in cTex, cKey, cEpoch */
 static void tex_unit(int u, HwTex *x, GLenum minF, GLenum magF, GLenum ws, GLenum wt, long *cTex, long *cKey,
                      long *cEpoch)
 {
@@ -413,13 +413,13 @@ static void tex_unit(int u, HwTex *x, GLenum minF, GLenum magF, GLenum ws, GLenu
     x->lastUse = gFrame;
 }
 
-/* q3-16: transformácia. Fixed-function NV34 násobí vrchol maticou PROJECTION (ako NV10/NV20
- * v nouveau: zložená matica), MODELVIEW ostáva jednotková; viewport (posun 0, mierka 1) je
- * v matici. Bez T&L jednotková matica (vrcholy v súradniciach okna, w = 1).
- * boot-args nv34gltnlt = matica transponovaná, nv34gltnlclamp = hĺbku obmedziť (bez orezania
- * blízkou/ďalekou rovinou), nv34gltnlcw = predná strana otočená (q3-16 predvolené, zlé).
- * q3-17: v T&L dávke textúrové súradnice len s, t (q = 1 doplní GPU) → 6 slov na vrchol
- * (s dvoma textúrami 8); boot-args nv34gltnl4 = 4 floaty ako bez T&L. */
+/* q3-16: transformation. Fixed-function NV34 multiplies the vertex by the PROJECTION matrix (like NV10/NV20
+ * in nouveau: a composite matrix), MODELVIEW stays identity; the viewport (offset 0, scale 1) is
+ * in the matrix. Without T&L an identity matrix (vertices in window coordinates, w = 1).
+ * boot-args nv34gltnlt = transposed matrix, nv34gltnlclamp = clamp depth (no clipping by the
+ * near/far plane), nv34gltnlcw = front face flipped (q3-16 default, wrong).
+ * q3-17: in a T&L batch the texture coordinates are only s, t (the GPU fills in q = 1) → 6 words per vertex
+ * (8 with two textures); boot-args nv34gltnl4 = 4 floats as without T&L. */
 static int gTnlT = -1, gTnlClamp, gTnlCw, gTnl4;
 
 static void mat_upload(NVU32 mthd, const float *m)
@@ -449,7 +449,7 @@ static void tnl_state(const HwState *st)
             mat_upload(M_MODELVIEW0, 0);
             hwMv = 0;
         }
-        begin(M_DEPTH_CONTROL, 1);                  /* 0x01 = orezať hĺbkou (GL), 0x10 = obmedziť */
+        begin(M_DEPTH_CONTROL, 1);                  /* 0x01 = clip by depth (GL), 0x10 = clamp */
         data(st->tnl && !gTnlClamp ? 0x01 : 0x10);
         if (!st->tnl) {
             mat_upload(M_PROJECTION0, 0);
@@ -458,8 +458,8 @@ static void tnl_state(const HwState *st)
         hwTnl = st->tnl;
         gCompact = st->tnl && !gTnl4 && !gVtx12;
     }
-    /* PROJECTION = celá matica okno × MVP (poloha, ako nouveau nv20_emit_projection); MODELVIEW len pre
-     * vzdialenosť hmly v priestore oka, inak identita */
+    /* PROJECTION = the whole window × MVP matrix (position, like nouveau nv20_emit_projection); MODELVIEW only for
+     * the fog distance in eye space, otherwise identity */
     if (st->tnl && (hwMatGen != (long)st->matGen || hwMv != (st->mv != 0))) {
         mat_upload(M_PROJECTION0, st->mat);
         if (st->mv || hwMv)
@@ -467,8 +467,8 @@ static void tnl_state(const HwState *st)
         hwMatGen = st->matGen;
         hwMv = st->mv != 0;
     }
-    /* odvrátené steny: bez T&L ich odstráni CPU. GPU berie FRONT_FACE podľa GL (q3-16: s otočením
-     * kvôli y dole zmizlo všetko) */
+    /* back faces: without T&L the CPU removes them. The GPU takes FRONT_FACE per GL (q3-16: with flipping
+     * because of y pointing down everything disappeared) */
     key = st->tnl && st->cull ? (long)((st->cullFace << 16) | st->frontFace) : 0;
     if (hwCull != key) {
         if (key) {
@@ -482,16 +482,16 @@ static void tnl_state(const HwState *st)
     }
 }
 
-/* ---- max-4: fragment programy pre glTexEnv (GL_COMBINE, BLEND, ADD, DECAL na 2 jednotkách) ----------
- * Kódovanie NV30 podľa nouveau nvfx_shader.h (overené na kFpTex/kFpTex2). Program:
+/* ---- max-4: fragment programs for glTexEnv (GL_COMBINE, BLEND, ADD, DECAL on 2 units) ----------
+ * NV30 encoding per nouveau nvfx_shader.h (verified on kFpTex/kFpTex2). Program:
  *   TXP R1, a[tex0], t[0]; (TXP R2, a[tex1], t[1]);
- *   pre jednotku u: R3.xyz = op(argumenty RGB), R3.w = op(argumenty alfa)  (predošlá = a[col0] / R3)
+ *   for unit u: R3.xyz = op(RGB arguments), R3.w = op(alpha arguments)  (previous = a[col0] / R3)
  *   MOVH H0, R3; END
- * Argumenty s OPERAND 1−x a konštanty (TEXTURE_ENV_COLOR) idú najprv do R4–R6 (jedna inline konštanta
- * a jeden vstup na inštrukciu). Výsledok H0 vidia combiners ako TEXTURE0, final combiner ho berie priamo.
- * Programy v VRAM od fpOffset + FPG_BASE, kruh miest po 256 B (kľúč = použitý stav prostredia).
- * max-6: konštanta (TEXTURE_ENV_COLOR) je v programe → Max Payne mení farbu ~8× za snímku; miesto sa
- * prepíše až po dokončení snímky, v ktorej sa naposledy použilo (REF_CNT), nie s hw_sync (max-5). */
+ * Arguments with OPERAND 1−x and constants (TEXTURE_ENV_COLOR) go into R4–R6 first (one inline constant
+ * and one input per instruction). The combiners see the result H0 as TEXTURE0, the final combiner takes it directly.
+ * Programs in VRAM from fpOffset + FPG_BASE, a ring of 256 B slots (key = the environment state used).
+ * max-6: the constant (TEXTURE_ENV_COLOR) is in the program → Max Payne changes the color ~8× per frame; a slot is
+ * overwritten only after the frame in which it was last used has finished (REF_CNT), not with hw_sync (max-5). */
 #define FPG_BASE    0x400
 #define FPG_SLOT    0x100
 #define FPG_N       ((0x10000 - FPG_BASE) / FPG_SLOT)
@@ -504,7 +504,7 @@ static void tnl_state(const HwState *st)
 #define FO_TXP  0x18
 #define FO_LRP  0x1F
 
-typedef struct FSrc { int type, reg, neg; NVU32 swz; float c[4]; } FSrc;   /* type 0 temp, 1 vstup, 2 konšt. */
+typedef struct FSrc { int type, reg, neg; NVU32 swz; float c[4]; } FSrc;   /* type 0 temp, 1 input, 2 const. */
 
 static NVU32 gFpg[160];
 static int gFpgN, gFpgMaxR, gFpgLast, gFpgOver;
@@ -513,7 +513,7 @@ static NVU32 gFpgFrame[FPG_N], gFpgHash[FPG_N];
 static int gFpgUsed, gFpgNext, gFpgLastSlot = -1;
 NVU32 gFpgEvict, gFpgNew;
 
-/* vstup (a[col0], a[texN]) sa udáva v slove 0 inštrukcie, v zdroji len typ a swizzle (kFpTex 0x1c9dc801) */
+/* an input (a[col0], a[texN]) is given in word 0 of the instruction, the source only has the type and swizzle (kFpTex 0x1c9dc801) */
 static NVU32 fsrc_word(const FSrc *x)
 {
     return (NVU32)x->type | (x->type == 0 ? (NVU32)x->reg << 2 : 0) | (x->swz << 9) | (x->neg ? 1u << 17 : 0);
@@ -571,7 +571,7 @@ static FSrc fs_const(float a, float b, float c, float d)
     return x;
 }
 
-/* argument i jednotky u (alpha = 0 RGB, 1 alfa) → FSrc, prípadne cez R4+i */
+/* argument i of unit u (alpha = 0 RGB, 1 alpha) → FSrc, possibly via R4+i */
 static FSrc fpg_arg(const HwEnvUnit *e, int u, int units, int alpha, int i)
 {
     GLenum src = e->src[alpha][i], op = e->op[alpha][i];
@@ -579,7 +579,7 @@ static FSrc fpg_arg(const HwEnvUnit *e, int u, int units, int alpha, int i)
     FSrc x;
     memset(&x, 0, sizeof(x));
     x.swz = am ? 0xFF : 0xE4;
-    if (src == 0x8576) {                            /* CONSTANT: hodnota na CPU */
+    if (src == 0x8576) {                            /* CONSTANT: value on the CPU */
         int k;
         float v[4];
         for (k = 0; k < 4; k++) {
@@ -591,7 +591,7 @@ static FSrc fpg_arg(const HwEnvUnit *e, int u, int units, int alpha, int i)
         fpg_emit(FO_MOV, 4 + i, 0, 0xF, 0, 0, -1, &x, 0, 0);
         return fs_temp(4 + i, 0xE4);
     }
-    if (src == 0x8577 || (src == 0x8578 && u == 0)) {   /* PRIMARY_COLOR, PREVIOUS na jednotke 0 */
+    if (src == 0x8577 || (src == 0x8578 && u == 0)) {   /* PRIMARY_COLOR, PREVIOUS on unit 0 */
         x.type = 1;
         x.reg = 1;                                  /* a[col0] */
     } else if (src == 0x8578) {
@@ -612,7 +612,7 @@ static FSrc fpg_arg(const HwEnvUnit *e, int u, int units, int alpha, int i)
 
 static int fpg_scale(float s) { return s >= 3.5f ? 2 : s >= 1.5f ? 1 : 0; }
 
-/* jedna časť (RGB alebo alfa) jednotky u do R3 s maskou m */
+/* one part (RGB or alpha) of unit u into R3 with mask m */
 static void fpg_part(const HwEnvUnit *e, int u, int units, int alpha, int m)
 {
     GLenum comb = e->comb[alpha];
@@ -656,7 +656,7 @@ static void fpg_part(const HwEnvUnit *e, int u, int units, int alpha, int m)
     }
 }
 
-/* pevné režimy → COMBINE */
+/* fixed modes → COMBINE */
 static void fpg_norm(const HwEnvUnit *in, HwEnvUnit *e)
 {
     *e = *in;
@@ -672,14 +672,14 @@ static void fpg_norm(const HwEnvUnit *in, HwEnvUnit *e)
     case GL_REPLACE:
         e->comb[0] = e->comb[1] = GL_REPLACE;
         break;
-    case GL_DECAL:                                  /* RGB = lerp(predošlá, tex, tex.a), alfa = predošlá */
+    case GL_DECAL:                                  /* RGB = lerp(previous, tex, tex.a), alpha = previous */
         e->comb[0] = 0x8575;
         e->src[0][2] = GL_TEXTURE;
         e->op[0][2] = GL_SRC_ALPHA;
         e->comb[1] = GL_REPLACE;
         e->src[1][0] = 0x8578;
         break;
-    case GL_BLEND:                                  /* RGB = lerp(farba prostredia, predošlá, tex) */
+    case GL_BLEND:                                  /* RGB = lerp(environment color, previous, tex) */
         e->comb[0] = 0x8575;
         e->src[0][0] = 0x8576;
         e->src[0][2] = GL_TEXTURE;
@@ -691,14 +691,14 @@ static void fpg_norm(const HwEnvUnit *in, HwEnvUnit *e)
     }
 }
 
-/* max-5: počet argumentov operácie */
+/* max-5: number of arguments of an operation */
 static int fpg_nargs(GLenum comb)
 {
     return comb == GL_REPLACE ? 1 : comb == 0x8575 ? 3 : 2;
 }
 
-/* max-5: v kľúči len to, čo program naozaj použije (max-4 generoval kvôli zmene nepoužitej
- * TEXTURE_ENV_COLOR stále nové programy → 64 miest sa prepisovalo počas kreslenia, textúry blikali) */
+/* max-5: the key only holds what the program actually uses (max-4 kept generating new programs because of changes
+ * to an unused TEXTURE_ENV_COLOR → the 64 slots got overwritten during drawing, textures flickered) */
 static void fpg_canon(HwEnvUnit *e)
 {
     int p, i, usesConst = 0;
@@ -713,16 +713,16 @@ static void fpg_canon(HwEnvUnit *e)
             if (e->src[p][i] == 0x8576)
                 usesConst = 1;
     }
-    if (e->comb[0] == 0x86AF) {                     /* DOT3_RGBA: alfa sa nepočíta */
+    if (e->comb[0] == 0x86AF) {                     /* DOT3_RGBA: alpha is not computed */
         e->comb[1] = 0;
         for (i = 0; i < 3; i++)
             e->src[1][i] = e->op[1][i] = 0;
     }
     if (!usesConst)
         e->color[0] = e->color[1] = e->color[2] = e->color[3] = 0;
-    for (i = 0; i < 4; i++)                         /* max-7: farba na 1/255 (rovnaký program) */
+    for (i = 0; i < 4; i++)                         /* max-7: color to 1/255 (same program) */
         e->color[i] = (float)(e->color[i] <= 0 ? 0 : e->color[i] >= 1 ? 255 : (int)(e->color[i] * 255.0f + 0.5f));
-    for (p = 0; p < 2; p++)                         /* max-7: mierka len 1, 2, 4 (DST_SCALE) */
+    for (p = 0; p < 2; p++)                         /* max-7: scale only 1, 2, 4 (DST_SCALE) */
         e->scale[p] = (float)fpg_scale(e->scale[p]);
 }
 
@@ -742,7 +742,7 @@ static void fpg_key(const HwEnvUnit *env, int units, NVU32 *k)
     }
 }
 
-/* program pre prostredie env (units jednotiek) → posun v VRAM a FP_CONTROL */
+/* program for environment env (units units) → offset in VRAM and FP_CONTROL */
 static NVU32 fpg_get(const HwEnvUnit *env, int units, NVU32 *ctl)
 {
     NVU32 key[FPG_KEYW];
@@ -789,16 +789,16 @@ static NVU32 fpg_get(const HwEnvUnit *env, int units, NVU32 *ctl)
     if (gFpgOver || gFpgN * 4 > FPG_SLOT) {
         static int logged;
         if (!logged++)
-            lg("texenv program: prilis dlhy (%d slov)", gFpgN);
+            lg("texenv program: too long (%d words)", gFpgN);
         *ctl = 0;
         return 0;
     }
     gFpgNew++;
-    if (gFpgNew <= 40 && gFpgLastSlot >= 0) {      /* max-7: čím sa nový kľúč líši od posledného */
+    if (gFpgNew <= 40 && gFpgLastSlot >= 0) {      /* max-7: how the new key differs from the last one */
         for (i = 0; i < FPG_KEYW && key[i] == gFpgKey[gFpgLastSlot][i]; i++)
             ;
         if (i < FPG_KEYW)
-            lg("texenv novy kluc: slovo %d (jednotka %d, pole %d) %x -> %x", i, i ? (i - 1) / 23 : -1,
+            lg("texenv new key: word %d (unit %d, field %d) %x -> %x", i, i ? (i - 1) / 23 : -1,
                i ? (i - 1) % 23 : -1, gFpgKey[gFpgLastSlot][i], key[i]);
     }
     if (gFpgUsed < FPG_N) {
@@ -807,9 +807,9 @@ static NVU32 fpg_get(const HwEnvUnit *env, int units, NVU32 *ctl)
         slot = gFpgNext;
         gFpgNext = (gFpgNext + 1) % FPG_N;
         if (gFpgFrame[slot] >= gFrame || gRefOK != 1) {
-            hw_sync();                              /* kruh sa pretočil v rámci snímky */
+            hw_sync();                              /* the ring wrapped within a frame */
             gFpgEvict++;
-        } else if (gpu_done() < gFpgFrame[slot]) {  /* počkať na snímku, v ktorej sa miesto použilo */
+        } else if (gpu_done() < gFpgFrame[slot]) {  /* wait for the frame in which the slot was used */
             NVU32 t0 = TickCount();
             nva_kickoff(S->a);
             gFpgEvict++;
@@ -824,19 +824,19 @@ static NVU32 fpg_get(const HwEnvUnit *env, int units, NVU32 *ctl)
         gFpgKey[slot][i] = key[i];
     gFpgHash[slot] = h;
     gFpgFrame[slot] = gFrame;
-    gFpgCtl[slot] = (NVU32)gFpgMaxR / 2;            /* (počet R − 1) / 2 */
+    gFpgCtl[slot] = (NVU32)gFpgMaxR / 2;            /* (number of R − 1) / 2 */
     fp_upload(FPG_BASE + (NVU32)slot * FPG_SLOT, gFpg, gFpgN);
-    hwProg = -1;                                    /* max-7: nový obsah aj na tej istej adrese → znova nastaviť */
+    hwProg = -1;                                    /* max-7: new contents even at the same address → set again */
     if (gFpgUsed <= 12 || (gFpgNew & 1023) == 0) {
-        lg("texenv program %d: %d jednotky, %d slov, R0-R%d; j0 %x %x/%x z %x %x %x / %x %x %x", slot, units, gFpgN,
+        lg("texenv program %d: %d units, %d words, R0-R%d; u0 %x %x/%x from %x %x %x / %x %x %x", slot, units, gFpgN,
            gFpgMaxR, env[0].mode, env[0].comb[0], env[0].comb[1], env[0].src[0][0], env[0].src[0][1],
            env[0].src[0][2], env[0].op[0][0], env[0].op[0][1], env[0].op[0][2]);
-        lg("  j0 alfa z %x %x %x / %x %x %x, farba %f %f %f %f, mierka %f %f", env[0].src[1][0], env[0].src[1][1],
+        lg("  u0 alpha from %x %x %x / %x %x %x, color %f %f %f %f, scale %f %f", env[0].src[1][0], env[0].src[1][1],
            env[0].src[1][2], env[0].op[1][0], env[0].op[1][1], env[0].op[1][2], (double)env[0].color[0],
            (double)env[0].color[1], (double)env[0].color[2], (double)env[0].color[3], (double)env[0].scale[0],
            (double)env[0].scale[1]);
         if (units == 2)
-            lg("  j1 %x %x/%x z %x %x %x / %x %x %x", env[1].mode, env[1].comb[0], env[1].comb[1], env[1].src[0][0],
+            lg("  u1 %x %x/%x from %x %x %x / %x %x %x", env[1].mode, env[1].comb[0], env[1].comb[1], env[1].src[0][0],
                env[1].src[0][1], env[1].src[0][2], env[1].op[0][0], env[1].op[0][1], env[1].op[0][2]);
     }
     gFpgLastSlot = slot;
@@ -844,17 +844,17 @@ static NVU32 fpg_get(const HwEnvUnit *env, int units, NVU32 *ctl)
     return FPG_BASE + (NVU32)slot * FPG_SLOT;
 }
 
-/* vráti 0 bez textúry, 1 s textúrou, 2 s dvoma (textúry sú vo VRAM) */
+/* returns 0 without a texture, 1 with a texture, 2 with two (the textures are in VRAM) */
 int hw_state(HwTarget *t, const HwState *st)
 {
     long key;
     int mode = st->tex && tex_resident(st->tex), fog, gen;
 
-    /* q3-12: druhá jednotka (nie s pôvodným 12-slovným formátom nv34glvtx12) */
+    /* q3-12: second unit (not with the original 12-word format nv34glvtx12) */
     vtx_init();
     if (mode && st->tex1 && tex_resident(st->tex1) && !gVtx12)
         mode = 2;
-    /* textúra */
+    /* texture */
     if (mode) {
         tex_unit(0, st->tex, st->minFilter, st->magFilter, st->wrapS, st->wrapT, &hwTex, &hwTexKey, &hwTexEpoch);
         if (mode == 2)
@@ -862,7 +862,7 @@ int hw_state(HwTarget *t, const HwState *st)
                      &hwTex1Epoch);
     }
     if (hwMode != mode) {
-        if (hwMode == 2 || hwMode < 0) {            /* jednotku 1 vypnúť, späť program s jednou textúrou */
+        if (hwMode == 2 || hwMode < 0) {            /* disable unit 1, back to the single-texture program */
             begin(M_TEX_OFFSET0 + 0x20 + 0x0c, 1);
             data(0);
             hwTex1 = -1;
@@ -872,8 +872,8 @@ int hw_state(HwTarget *t, const HwState *st)
             data(0);
         } else {
             begin(M_TEX_UNITS_ENABLE, 1);
-            data(mode == 2 ? 3 : 1);                /* interpolované súradnice tex0 (a tex1) */
-            begin(M_RC_IN_ALPHA0, 6);               /* tex0 (pri dvoch tex0 × tex1 z programu) × primárna → spare0 */
+            data(mode == 2 ? 3 : 1);                /* interpolated coordinates tex0 (and tex1) */
+            begin(M_RC_IN_ALPHA0, 6);               /* tex0 (with two, tex0 × tex1 from the program) × primary → spare0 */
             data((0x18u << 24) | (0x14u << 16));
             data((0x08u << 24) | (0x04u << 16));
             data(0);
@@ -883,7 +883,7 @@ int hw_state(HwTarget *t, const HwState *st)
         }
         hwMode = mode;
     }
-    /* program: kFpTex / kFpTex2, max-4: pri inom prostredí vygenerovaný (FP_CONTROL = počet registrov) */
+    /* program: kFpTex / kFpTex2, max-4: generated for other environments (FP_CONTROL = register count) */
     gen = 0;
     if (mode) {
         NVU32 prog = mode == 2 ? FP2_OFF : 0, ctl = 0;
@@ -902,13 +902,13 @@ int hw_state(HwTarget *t, const HwState *st)
             hwProg = prog;
         }
     }
-    /* final combiner: farba = D (primárna / spare0); s hmlou A·B + (1−A)·C, A = FOG.a (faktor hmly),
-     * B = farba, C = FOG.rgb (farba hmly) ako v nouveau nv10_state_frag.c */
-    /* wolf-8: len pri T&L — zdroj 6 (súradnica z vrcholu, NV20) NV30 odmietol (DATA_ERROR na 0x8c8) */
+    /* final combiner: color = D (primary / spare0); with fog A·B + (1−A)·C, A = FOG.a (fog factor),
+     * B = color, C = FOG.rgb (fog color) as in nouveau nv10_state_frag.c */
+    /* wolf-8: only with T&L — source 6 (coordinate from the vertex, NV20) was rejected by NV30 (DATA_ERROR at 0x8c8) */
     fog = st->fog && st->tnl && !gNoFog && !gVtx12;
     key = (mode != 0) | (fog << 1) | (gen << 2);
     if (hwFin != key) {
-        NVU32 col = gen ? 0x08 : mode ? 0x0c : 0x04;   /* max-4: výsledok programu (TEXTURE0) priamo */
+        NVU32 col = gen ? 0x08 : mode ? 0x0c : 0x04;   /* max-4: the program's result (TEXTURE0) directly */
         begin(M_RC_FINAL0, 3);
         data(fog ? (0x13u << 24) | (col << 16) | (0x03u << 8) : col);
         data((col | 0x10) << 8);
@@ -916,8 +916,8 @@ int hw_state(HwTarget *t, const HwState *st)
         hwFin = key;
     }
     if (fog) {
-        /* zdroj: radiálna vzdialenosť (RADIAL, režimy SIGNED). wolf-9: ORTHOGONAL_ABS s UNSIGNED (NV20,
-         * predvolené v Mesa) na NV30 hmlu nedal → len boot-args nv34glfogplane (pokus) */
+        /* source: radial distance (RADIAL, SIGNED modes). wolf-9: ORTHOGONAL_ABS with UNSIGNED (NV20,
+         * Mesa's default) gave no fog on NV30 → only boot-args nv34glfogplane (experiment) */
         int uns = gFogPlane;
         NVU32 k[6];
         int i;
@@ -937,7 +937,7 @@ int hw_state(HwTarget *t, const HwState *st)
             static int logged;
             if (!logged) {
                 logged = 1;
-                lg("hmla: zdroj %u, rezim %x, k %f %f/1e6, farba %x (T&L %d)", k[0], k[1], (double)a.f, (double)b.f * 1e6,
+                lg("fog: source %u, mode %x, k %f %f/1e6, color %x (T&L %d)", k[0], k[1], (double)a.f, (double)b.f * 1e6,
                    k[5], st->tnl);
             }
             begin(M_FOG_COORD_DIST, 5);
@@ -987,7 +987,7 @@ int hw_state(HwTarget *t, const HwState *st)
             hwAlpha = key;
         }
     }
-    /* hĺbka: bez testu ani zápis (GL) */
+    /* depth: without a test no write either (GL) */
     key = st->depthTest ? (long)((st->depthFunc << 2) | (st->depthWrite ? 2 : 0) | 1) : 0;
     if (hwDepth != key) {
         begin(M_DEPTH_FUNC, 1);
@@ -1036,7 +1036,7 @@ void hw_clear(HwTarget *t, int color, int depth, NVU32 argb, NVU32 zval, const H
     }
 }
 
-/* ---- vrcholy ------------------------------------------------------------- */
+/* ---- vertices ------------------------------------------------------------- */
 
 static inline NVU32 vcolor(const HwVtx *v)
 {
@@ -1064,11 +1064,11 @@ void hw_draw(int prim, const HwVtx *v, int n, int textured)
         if (gHwDead)
             return;
         if (nva_begin(S->a, SUBC, 0x40000000 | M_VERTEX_DATA, cnt * wpv) != kNVAOK) {
-            hw_fail("vrcholy");
+            hw_fail("vertices");
             return;
         }
-        gTWait += tb() - t0;                        /* čakanie na miesto v push buffri */
-        /* opt-1: miesto je rezervované → zapisovať priamo (bez volania nva_push na slovo) */
+        gTWait += tb() - t0;                        /* waiting for room in the push buffer */
+        /* opt-1: the space is reserved → write directly (no nva_push call per word) */
         p = (volatile float *)(S->a->dmaBase + S->a->dmaCurrent);
         if (gVtx12) {
             for (i = 0; i < cnt; i++, v++) {
@@ -1120,16 +1120,16 @@ void hw_draw(int prim, const HwVtx *v, int n, int textured)
     data(0);
 }
 
-/* ---- q3-18: vrcholy vo VRAM + indexy ------------------------------------------
- * Kruhový buffer 2 MB v 16 úsekoch; úsek nesie číslo snímky, ktorá ho naposledy použila, a znova
- * sa doň píše, až keď ho GPU dokončil (REF_CNT = snímka). Do úseku, v ktorom sa práve píše, sa
- * pokračuje bez kontroly; keby sa kruh pretočil v rámci jednej snímky, počká sa na celé GPU.
- * Vrchol má rovnaký formát ako kratší inline vrchol T&L (q3-17). Indexy idú do push buffra
- * (VB_ELEMENT_U16, prvý index v dolnej polovici slova ako v nouveau).
- * q3-19: GPU odmietol prvé VB_ELEMENT_U16 (DATA_ERROR, INVALID_STATE) → q3-20 len na boot-args
- * nv34glvb; nv34glvbbatch = bez indexov (vrcholy v poradí trojuholníkov, VB_VERTEX_BATCH).
- * boot-args nv34glvbswap = vrchol v poradí bajtov LE, nv34glidxhi = prvý
- * index v hornej polovici slova, nv34glvbinv = VTX_CACHE_INV (0x1710) pred kreslením. */
+/* ---- q3-18: vertices in VRAM + indices ------------------------------------------
+ * A 2 MB ring buffer in 16 segments; a segment carries the number of the frame that last used it, and it is
+ * written again only once the GPU has finished it (REF_CNT = frame). The segment currently being written
+ * is continued without checking; should the ring wrap within a single frame, we wait for the whole GPU.
+ * A vertex has the same format as the shorter inline T&L vertex (q3-17). Indices go into the push buffer
+ * (VB_ELEMENT_U16, the first index in the lower half of the word as in nouveau).
+ * q3-19: the GPU rejected the first VB_ELEMENT_U16 (DATA_ERROR, INVALID_STATE) → q3-20 only with boot-args
+ * nv34glvb; nv34glvbbatch = no indices (vertices in triangle order, VB_VERTEX_BATCH).
+ * boot-args nv34glvbswap = vertex in LE byte order, nv34glidxhi = first
+ * index in the upper half of the word, nv34glvbinv = VTX_CACHE_INV (0x1710) before drawing. */
 #define VB_SIZE     (2u << 20)
 #define VB_SEGS     16
 #define VB_SEG      (VB_SIZE / VB_SEGS)
@@ -1147,7 +1147,7 @@ int hw_vb_batch(void) { return gVbBatch; }
 int hw_vb_ready(void)
 {
     if (gVbOn < 0) {
-        gVbOn = gl_boot_arg("nv34glvb");             /* q3-20: GPU v q3-18/19 odmietol VB_ELEMENT (pokus) */
+        gVbOn = gl_boot_arg("nv34glvb");             /* q3-20: the GPU rejected VB_ELEMENT in q3-18/19 (experiment) */
         gVbBatch = gl_boot_arg("nv34glvbbatch");
         gVbSwap = gl_boot_arg("nv34glvbswap");
         gIdxHi = gl_boot_arg("nv34glidxhi");
@@ -1155,14 +1155,14 @@ int hw_vb_ready(void)
     }
     vtx_init();
     tnl_args();
-    if (!gVbOn || gRefOK != 1 || gTnl4 || gVtx12 || gHwDead)   /* len kratší formát T&L */
+    if (!gVbOn || gRefOK != 1 || gTnl4 || gVtx12 || gHwDead)   /* shorter T&L format only */
         return 0;
-    if (gVbOff && gVbGen != S->generation)          /* 3D znova inicializované: buffer zabudnúť */
+    if (gVbOff && gVbGen != S->generation)          /* 3D reinitialized: forget the buffer */
         gVbOff = 0;
     if (!gVbOff) {
         gVbOff = S->vramAlloc(VB_SIZE, 256);
         if (!gVbOff) {
-            lg("vrcholy vo VRAM: nie je miesto (%u KB)", VB_SIZE >> 10);
+            lg("vertices in VRAM: no room (%u KB)", VB_SIZE >> 10);
             gVbOn = 0;
             return 0;
         }
@@ -1171,7 +1171,7 @@ int hw_vb_ready(void)
         gVbCurSeg = -1;
         gVbGen = S->generation;
         if (first_time(0x72000000))
-            lg("vrcholy vo VRAM: %u KB na %x", VB_SIZE >> 10, gVbOff);
+            lg("vertices in VRAM: %u KB at %x", VB_SIZE >> 10, gVbOff);
     }
     return 1;
 }
@@ -1202,7 +1202,7 @@ volatile NVU32 *hw_vb_begin(NVU32 bytes)
         if (f && f > gpu_done()) {
             gHwVbWaits++;
             if (f >= gFrame) {
-                hw_sync();                          /* kruh pretočený v jednej snímke */
+                hw_sync();                          /* the ring wrapped within one frame */
             } else {
                 NVU32 t0 = TickCount(), w0 = tb();
                 nva_kickoff(S->a);
@@ -1227,7 +1227,7 @@ NVU32 hw_vb_end(NVU32 used)
     return gVbOff + gVbStart;
 }
 
-/* jeden vrchol do VRAM: x, y, z, farba, s, t (s1, t1) */
+/* one vertex into VRAM: x, y, z, color, s, t (s1, t1) */
 void hw_vb_put(volatile NVU32 *d, const HwVtx *v, int textured)
 {
     union { float f; NVU32 u; } a[7];
@@ -1263,17 +1263,17 @@ void hw_draw_indexed(int prim, NVU32 vbOff, int textured, const NVU16 *idx, int 
         if (textured == 2)
             data(vbOff + 24);
     }
-    if (gVbInv) {                                   /* q3-19: v q3-18 GPU zastal — možno len NV40 */
+    if (gVbInv) {                                   /* q3-19: the GPU stalled in q3-18 — maybe NV40 only */
         begin(M_VTX_CACHE_INV, 1);
         data(0);
     }
     if (!gVbUsed)
-        lg("prve kreslenie z VRAM: vrcholy na %x, textury %d, %s %d", vbOff, textured, idx ? "indexov" : "vrcholov",
+        lg("first draw from VRAM: vertices at %x, textures %d, %s %d", vbOff, textured, idx ? "indices" : "vertices",
            n);
     gVbUsed = 1;
     begin(M_VERTEX_BEGIN_END, 1);
     data(prim);
-    if (!idx) {                                     /* VB_VERTEX_BATCH: (počet − 1) << 24 | začiatok */
+    if (!idx) {                                     /* VB_VERTEX_BATCH: (count − 1) << 24 | start */
         NVU32 start = 0;
         while (n) {
             NVU32 c = n > 256 ? 256 : n;
@@ -1297,7 +1297,7 @@ void hw_draw_indexed(int prim, NVU32 vbOff, int textured, const NVU16 *idx, int 
         if (cnt > 2047)
             cnt = 2047;
         if (nva_begin(S->a, SUBC, 0x40000000 | M_VB_ELEMENT_U16, cnt) != kNVAOK) {
-            hw_fail("indexy");
+            hw_fail("indices");
             return;
         }
         p = S->a->dmaBase + S->a->dmaCurrent;
@@ -1314,8 +1314,8 @@ void hw_draw_indexed(int prim, NVU32 vbOff, int textured, const NVU16 *idx, int 
     data(0);
 }
 
-/* q3-20: inline vrcholy T&L priamo z pripravenej tabuľky podľa indexov (bez kópie do dávky);
- * len kratší formát (q3-17). 0 = nedá sa. */
+/* q3-20: inline T&L vertices straight from the prepared table by index (no copy into a batch);
+ * shorter format only (q3-17). 0 = not possible. */
 int hw_gather_ok(void)
 {
     vtx_init();
@@ -1340,7 +1340,7 @@ void hw_draw_gather(int prim, const HwVtx *base, const NVU16 *idx, int n, int te
         if (gHwDead)
             return;
         if (nva_begin(S->a, SUBC, 0x40000000 | M_VERTEX_DATA, cnt * wpv) != kNVAOK) {
-            hw_fail("vrcholy");
+            hw_fail("vertices");
             return;
         }
         gTWait += tb() - t0;
@@ -1364,7 +1364,7 @@ void hw_draw_gather(int prim, const HwVtx *base, const NVU16 *idx, int n, int te
     data(0);
 }
 
-/* ---- textúry ------------------------------------------------------------- */
+/* ---- textures ------------------------------------------------------------- */
 
 static NVU32 gSwX[2048], gSwY[2048];
 
@@ -1392,10 +1392,10 @@ HwTex *hw_tex_new(void)
 {
     HwTex *t = (HwTex *)NewPtrClear(sizeof(HwTex));
     if (!t)
-        t = (HwTex *)NewPtrSysClear(sizeof(HwTex));     /* q3-7: Quake III zaplní haldu aplikácie */
+        t = (HwTex *)NewPtrSysClear(sizeof(HwTex));     /* q3-7: Quake III fills up the application heap */
     if (!t) {
         if (first_time(0x71100000))
-            lg("hw_tex_new: malo pamate");
+            lg("hw_tex_new: out of memory");
         return 0;
     }
     t->magic = 'NVgt';
@@ -1406,8 +1406,8 @@ HwTex *hw_tex_new(void)
     return t;
 }
 
-/* opt-5: VRAM textúry, ktorú GPU možno ešte číta, sa uvoľní až po jej poslednej snímke (fence) —
- * predtým každé glDeleteTextures čakalo na GPU */
+/* opt-5: VRAM of a texture the GPU may still be reading is released only after its last frame (fence) —
+ * previously every glDeleteTextures waited for the GPU */
 #define PEND_MAX 512
 static struct { NVU32 off, frame; } gPend[PEND_MAX];
 static int gPendN;
@@ -1443,11 +1443,11 @@ static void vram_release(NVU32 off, NVU32 frame)
         return;
     }
     if (gRefOK != 1 && frame >= gFrame - 1)
-        hw_sync();                                  /* bez fence ako predtým */
+        hw_sync();                                  /* no fence, as before */
     S->vramFree(off);
 }
 
-/* pri ukončení / zrušení kontextu: všetko odložené vrátiť do arény */
+/* on exit / context destruction: return everything deferred to the arena */
 void hw_pend_flush(void)
 {
     if (!S || !gPendN)
@@ -1456,7 +1456,7 @@ void hw_pend_flush(void)
     pend_process(1);
 }
 
-/* glFinish (opt-5): počkať len na predchádzajúcu snímku, nie na celú prácu GPU */
+/* glFinish (opt-5): wait only for the previous frame, not for all GPU work */
 NVU32 gTFinish, gFinishN;
 static int gNoFinish = -1;
 
@@ -1468,7 +1468,7 @@ void hw_finish(void)
     gFinishN++;
     if (gNoFinish < 0)
         gNoFinish = gl_boot_arg("nv34glnofinish");
-    if (gNoFinish) {                                /* q3-9: test — len odoslať, nečakať */
+    if (gNoFinish) {                                /* q3-9: test — just submit, do not wait */
         nva_kickoff(S->a);
         return;
     }
@@ -1506,7 +1506,7 @@ void hw_tex_free(HwTex *t)
     DisposePtr((Ptr)t);
 }
 
-/* VRAM pre textúru; pri nedostatku uvoľní najdlhšie nepoužité (dáta sú v RAM v GL vrstve) */
+/* VRAM for a texture; when short, evicts the least recently used ones (the data is in RAM in the GL layer) */
 static NVU32 alloc_evict_(HwTex *t, NVU32 size);
 
 static NVU32 alloc_evict(HwTex *t, NVU32 size)
@@ -1537,7 +1537,7 @@ static NVU32 alloc_evict_(HwTex *t, NVU32 size)
             if (lru->off) S->vramFree(lru->off);
             if (lru->alt) S->vramFree(lru->alt);
             lru->off = lru->alt = 0;
-            lru->levels = 0;                        /* GL vrstva ju nahrá znova */
+            lru->levels = 0;                        /* the GL layer uploads it again */
             off = S->vramAlloc(size, 256);
         }
         gEpoch++;
@@ -1570,15 +1570,15 @@ int hw_tex_upload(HwTex *t, int w, int h, int levels, void *const *pix, int fmt,
         if (ch > 1) ch >>= 1;
     }
     size = (size + 63) & ~63UL;
-    if (t->size != size) {                          /* iná veľkosť: nové oblasti */
+    if (t->size != size) {                          /* different size: new areas */
         vram_release(t->off, t->frameUsed);
         vram_release(t->alt, t->altUsed);
         t->off = t->alt = 0;
         t->size = size;
     }
     if (t->off && t->frameUsed > gpu_done()) {
-        /* GPU ju v tejto snímke možno ešte číta → zapisovať do druhej oblasti (rave-22);
-         * ak sa v tejto snímke čítala aj druhá (Quake 2 dynamická lightmapa), počkať na GPU */
+        /* the GPU may still be reading it in this frame → write into the second area (rave-22);
+         * if the second one was also read in this frame (Quake 2 dynamic lightmap), wait for the GPU */
         NVU32 tmp;
         if (!t->alt)
             t->alt = alloc_evict(t, size);
@@ -1588,7 +1588,7 @@ int hw_tex_upload(HwTex *t, int w, int h, int levels, void *const *pix, int fmt,
             tmp = t->off;
             t->off = t->alt;
             t->alt = tmp;
-            tmp = t->frameUsed;                     /* aj snímky posledného čítania si vymenia miesto */
+            tmp = t->frameUsed;                     /* the last-read frames swap places too */
             t->frameUsed = t->altUsed;
             t->altUsed = tmp;
         }
@@ -1622,7 +1622,7 @@ int hw_tex_upload(HwTex *t, int w, int h, int levels, void *const *pix, int fmt,
                 for (x = 0; x < (NVU32)cw; x++)
                     d[oy | gSwX[x]] = src[x];
             }
-        } else if (srcfmt == fmt) {                 /* wolf-2: kópia v RAM už 16-bit */
+        } else if (srcfmt == fmt) {                 /* wolf-2: the RAM copy is already 16-bit */
             volatile NVU16 *d = (volatile NVU16 *)dst;
             const NVU16 *s16 = (const NVU16 *)pix[lv];
             for (y = 0; y < (NVU32)ch; y++, s16 += cw) {
@@ -1652,8 +1652,8 @@ int hw_tex_upload(HwTex *t, int w, int h, int levels, void *const *pix, int fmt,
     return 1;
 }
 
-/* opt-1: len obdĺžnik úrovne 0 priamo na mieste (lightmapy Quake 2 po každom glTexSubImage2D
- * nahrávali celých 64 KB). Iba ak ju GPU v tejto snímke ešte nečítal; inak 0 → celé nahratie. */
+/* opt-1: only the level 0 rectangle, directly in place (Quake 2 lightmaps uploaded the whole 64 KB after every
+ * glTexSubImage2D). Only if the GPU has not read it in this frame yet; otherwise 0 → a full upload. */
 int hw_tex_subupload(HwTex *t, int x0, int y0, int w, int h, const void *srcv, int stride, int srcfmt)
 {
     int x, y;
@@ -1689,13 +1689,13 @@ int hw_tex_subupload(HwTex *t, int x0, int y0, int w, int h, const void *srcv, i
         }
     }
     __asm__ volatile("sync" ::: "memory");
-    gEpoch++;                                       /* znova TEX_OFFSET (vyprázdni cache textúr) */
+    gEpoch++;                                       /* TEX_OFFSET again (flushes the texture cache) */
     gHwSubUploads++;
     gHwUploadBytes += (NVU32)w * h * (t->fmt == 0x06 ? 4 : 2);
     return 1;
 }
 
-/* ---- prenos na obrazovku ---------------------------------------------------- */
+/* ---- transfer to the screen ---------------------------------------------------- */
 
 #define MAX_XS 128
 
@@ -1723,7 +1723,7 @@ static void blit(HwTarget *t, PixMapPtr pm, const Rect *dst, long l, long tp, lo
     if (tp < dst->top) tp = dst->top;
     if (r > dst->right) r = dst->right;
     if (b > dst->bottom) b = dst->bottom;
-    /* hl-2: aj na hranice obrazovky (po zmene rozlíšenia môže okno presahovať) */
+    /* hl-2: clip to the screen bounds too (after a resolution change the window may stick out) */
     if (l < pm->bounds.left) l = pm->bounds.left;
     if (tp < pm->bounds.top) tp = pm->bounds.top;
     if (r > pm->bounds.right) r = pm->bounds.right;
@@ -1734,9 +1734,9 @@ static void blit(HwTarget *t, PixMapPtr pm, const Rect *dst, long l, long tp, lo
                   (int)(l - pm->bounds.left), (int)(tp - pm->bounds.top), (int)(r - l), (int)(b - tp));
 }
 
-/* fps-1: oneskorená myš nad 60 fps — CPU nesmie predbehnúť GPU o viac ako jednu snímku
- * (inak sa snímky hromadia v push buffri a obraz zaostáva za vstupom);
- * nv34glqueue = bez obmedzenia (ako predtým) */
+/* fps-1: laggy mouse above 60 fps — the CPU must not get more than one frame ahead of the GPU
+ * (otherwise frames pile up in the push buffer and the picture lags behind input);
+ * nv34glqueue = no limit (as before) */
 static int gQueue = -1;
 
 static void present_throttle(void)
@@ -1747,7 +1747,7 @@ static void present_throttle(void)
     if (gQueue || gRefOK != 1)
         return;
     t0 = TickCount();
-    while (gpu_done() + 2 < gFrame)                 /* hotová musí byť aspoň predchádzajúca snímka */
+    while (gpu_done() + 2 < gFrame)                 /* at least the previous frame must be finished */
         if (TickCount() - t0 > 120) {
             hw_sync();
             break;
@@ -1762,16 +1762,16 @@ void hw_present(HwTarget *t, GDHandle gd, const Rect *dst, RgnHandle clip)
     if (gHwDead)
         return;
     if (gDbg)
-        lg("  present: obrazovka %dx%d %d bpp base %x, ensure3D", pm->bounds.right - pm->bounds.left,
+        lg("  present: screen %dx%d %d bpp base %x, ensure3D", pm->bounds.right - pm->bounds.left,
            pm->bounds.bottom - pm->bounds.top, pm->pixelSize, (NVU32)pm->baseAddr);
     if (pm->pixelSize != t->bpp || S->ensure3D() != 0 || S->a->depth != (NVU32)t->bpp) {
         if (first_time(0x71000000 | (pm->pixelSize << 8) | (NVU32)t->bpp))
-            lg("present vynechany: obrazovka %d bpp, buffer %d bpp, 2D povrch %u bpp, 3D stav %u",
+            lg("present skipped: screen %d bpp, buffer %d bpp, 2D surface %u bpp, 3D state %u",
                pm->pixelSize, t->bpp, S->a->depth, S->state3D);
         return;
     }
     if (gDbg)
-        lg("  present: blit (2D povrch %u bpp)", S->a->depth);
+        lg("  present: blit (2D surface %u bpp)", S->a->depth);
     if (!clip || !*clip || (*clip)->rgnSize == 10) {
         if (clip && *clip) {
             Rect *bb = &(*clip)->rgnBBox;
@@ -1799,7 +1799,7 @@ void hw_present(HwTarget *t, GDHandle gd, const Rect *dst, RgnHandle clip)
         HUnlock((Handle)clip);
     }
     if (gRefOK == 1)
-        ref_emit(gFrame - 1);                       /* snímka gFrame − 1 odoslaná celá */
+        ref_emit(gFrame - 1);                       /* frame gFrame − 1 fully submitted */
     pend_process(0);
     nva_kickoff(S->a);
     present_throttle();

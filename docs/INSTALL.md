@@ -1,100 +1,111 @@
-# NV34 pre Mac OS 9 — inštalácia a použitie
+# NV34 for Mac OS 9 — installation and use
 
-Ovládače a 3D pre **GeForce FX Go5200 (NV34)** v **PowerBooku G4 12" (PowerBook6,2)** pod
-**Mac OS 9.2.x**. Výsledok fáz 1–4 (driver, 2D akcelerácia, RAVE, vlastné OpenGL).
+Drivers and 3D for the **GeForce FX Go5200 (NV34)** in the **12" PowerBook G4 (PowerBook6,2)** under
+**Mac OS 9.2.x**. The result of phases 1–4 (driver, 2D acceleration, RAVE, our own OpenGL).
 
-## Obsah balíka (`NV34 Release.dsk`)
+## Package contents (`NV34 Release.dsk`)
 
-| Priečinok | Súbor | Čo to je | Kam patrí |
+| Folder | File | What it is | Where it goes |
 |---|---|---|---|
-| Do Extensions | **NV34 NDRV** 4.0.4 | video driver: 1024×768 / 800×600 / 640×480, 256 / Thousands / Millions | `Systémová zložka:Extensions` |
-| Do Extensions | **NV34 QD Accel** 1.9 | INIT: 2D akcelerácia QuickDraw, správca GPU (push buffer, VRAM) pre 3D | `Systémová zložka:Extensions` |
-| Do Extensions | **NV34 RAVE** 1.1 | QuickDraw 3D RAVE engine (Unreal Tournament) | `Systémová zložka:Extensions` |
-| Do priecinka hry | **OpenGLLibrary** (NV34 MiniGL 1.0) | vlastné OpenGL 1.1 + AGL na GPU | **do priečinka hry** vedľa aplikácie, nie do Extensions |
-| Nastroje | NV34 Info, NV34 GL Check, NV34 DSp Test, NV34 RAVE Test | diagnostika | kamkoľvek |
-| Nastroje | **NV34 CPU** | vyšší takt procesora (765 → ~905 MHz) | kamkoľvek alebo `Startup Items` |
-| | Citaj ma | tento návod bez diakritiky | |
+| For Extensions | **NV34 NDRV** 4.0.4 | video driver: 1024×768 / 800×600 / 640×480, 256 / Thousands / Millions | `System Folder:Extensions` |
+| For Extensions | **NV34 QD Accel** 1.9 | INIT: QuickDraw 2D acceleration, GPU manager (push buffer, VRAM) for 3D | `System Folder:Extensions` |
+| For Extensions | **NV34 RAVE** 1.1 | QuickDraw 3D RAVE engine (Unreal Tournament) | `System Folder:Extensions` |
+| For Game Folder | **OpenGLLibrary** (NV34 MiniGL 1.0) | our own OpenGL 1.1 + AGL on the GPU | **into the game folder** next to the application, not into Extensions |
+| For Game Folder | **NV34 MiniGL config** | MiniGL settings (flags) | next to `OpenGLLibrary` |
+| Tools | NV34 Info, NV34 GL Check, NV34 DSp Test, NV34 RAVE Test | diagnostics | anywhere |
+| Tools | **NV34 CPU** | higher CPU clock (765 → ~905 MHz) | anywhere or `Startup Items` |
+| | Read Me | this guide as plain text | |
 
-Prenos: `.dsk` (Disk Copy) alebo `.bin` (StuffIt Expander). FAT kľúč, FTP či e-mail zahodia
-resource fork a typ súboru → OS 9 súbor ignoruje.
+Transfer: `.dsk` (Disk Copy) or `.bin` (StuffIt Expander). A FAT USB stick, FTP or e-mail drop the
+resource fork and the file type → OS 9 ignores the file.
 
-## Inštalácia
+## Installation
 
-1. Extensions Manager: vypnúť pôvodné NVIDIA 3.1 (Driver, Engine, 2D, OpenGL…) a ATI extensions.
-2. `NV34 NDRV`, `NV34 QD Accel` a `NV34 RAVE` skopírovať do `Systémová zložka:Extensions`.
-3. Reštart. Monitors: **Thousands** alebo **Millions** (3D v 256 farbách nefunguje).
+1. Extensions Manager: disable the original NVIDIA 3.1 extensions (Driver, Engine, 2D, OpenGL…) and the ATI extensions.
+2. Copy `NV34 NDRV`, `NV34 QD Accel` and `NV34 RAVE` into `System Folder:Extensions`.
+3. Restart. Monitors: **Thousands** or **Millions** (3D does not work in 256 colors).
 
-Apple OpenGL (OpenGLLibrary, OpenGLEngine…) v Extensions môže ostať — ostatné programy ho
-používajú ďalej; naša knižnica platí iba pre hru, v ktorej priečinku leží.
+Apple OpenGL (OpenGLLibrary, OpenGLEngine…) can stay in Extensions — other programs keep
+using it; our library only applies to the game whose folder it sits in.
 
-## Hry
+## Games
 
-| Hra | Cesta | Nastavenie | Výkon (640×480) |
+| Game | Path | Setup | Performance (640×480) |
 |---|---|---|---|
-| **Unreal Tournament** | NV34 RAVE | v štartovacom dialógu zvoliť RAVE | 30–50 fps |
-| **Quake II** | MiniGL | `OpenGLLibrary` do priečinka hry, ovládač OpenGL | timedemo 53–54 fps |
-| **Half-Life** (Xash3D, SDL „macosclassic“) | MiniGL | `OpenGLLibrary` do priečinka hry; `valve:video.cfg` celá obrazovka **len v 1024×768** | 25–75 fps |
-| **Quake III** (MacQuake3 1.1x) | MiniGL | `OpenGLLibrary` do priečinka hry; dáta zhodné s verziou aplikácie (pre 1.1x iba `pak0.pk3`); v Get Info viac pamäte | timedemo 61 fps |
-| **Return to Castle Wolfenstein** | MiniGL | `OpenGLLibrary` do priečinka hry; v Get Info aspoň 256 MB pamäte | 15–90 fps (náročné scény ~20 fps, brzdí CPU) |
+| **Unreal Tournament** | NV34 RAVE | choose RAVE in the startup dialog | 30–50 fps |
+| **Quake II** | MiniGL | `OpenGLLibrary` into the game folder, OpenGL renderer | timedemo 53–54 fps |
+| **Half-Life** (Xash3D, SDL "macosclassic") | MiniGL | `OpenGLLibrary` into the game folder; `valve:video.cfg` full screen **only at 1024×768** | 25–75 fps |
+| **Quake III** (MacQuake3 1.1x) | MiniGL | `OpenGLLibrary` into the game folder; data matching the application version (for 1.1x only `pak0.pk3`); more memory in Get Info | timedemo 61 fps |
+| **Return to Castle Wolfenstein** | MiniGL | `OpenGLLibrary` into the game folder; at least 256 MB of memory in Get Info | 15–90 fps (heavy scenes ~20 fps, CPU bound) |
+| **Max Payne** | MiniGL | `OpenGLLibrary` into the game folder | runs, cutscenes included |
+| **Medal of Honor: Allied Assault** | MiniGL | `OpenGLLibrary` into the game folder; **512 MB** of memory in Get Info (with 256 MB the game itself crashes with error 2) | heavy scenes ~10 fps (CPU bound) |
 
-Bez `OpenGLLibrary` v priečinku hra použije Apple OpenGL (softvérové, pomalé).
+Without `OpenGLLibrary` in its folder a game uses Apple OpenGL (software, slow).
 
-Nastavenia MiniGL sú v súbore **`NV34 MiniGL config`** vedľa `OpenGLLibrary` (funguje aj názov
-`NV34 MiniGL config.txt`). Každé slovo zapne jeden príznak, napr. `showfps` (počítadlo fps),
-`nofps` (bez obmedzenia na 60 fps), `stats` (časy do logu); riadok s `#` sa ignoruje. Zmena
-platí od ďalšieho spustenia hry, bez reštartu. Zoznam príznakov je v súbore. Boot-args
-(`nv34glshowfps` …) fungujú naďalej.
+MiniGL settings live in the file **`NV34 MiniGL config`** next to `OpenGLLibrary` (the name
+`NV34 MiniGL config.txt` works too). Every word turns on one flag, e.g. `showfps` (fps counter),
+`nofps` (no 60 fps limit), `stats` (timings to the log); lines starting with `#` are ignored. Changes
+apply from the next game launch, without a restart. The list of flags is in the file. Boot-args
+(`nv34glshowfps` …) keep working too. If double-clicking the file does not open it, drag it onto SimpleText.
 
-MiniGL podporuje dve textúry naraz (GL_ARB_multitexture) a v `glDrawElements` hardvérovú
-transformáciu (T&L) — polohy vrcholov, orezanie a odvrátené steny počíta GPU.
+By default MiniGL limits the frame rate to 60 fps — above 60 fps games responded to the mouse with a delay.
 
-Procesor PowerBooku 6,2 beží pod Mac OS 9 na ~765 MHz namiesto 1 GHz: zbernica ostáva na 102 MHz
-(Mac OS 9 na tomto modeli rýchlosť neprepína). Hry s náročnou logikou (Wolfenstein) brzdí CPU.
-**NV34 CPU** prepne zbernicu na vyššiu rýchlosť (GPIO KeyLargo ako Linux): procesor ~905 MHz,
-čítanie RAM +22 %, Wolfenstein ~22 → ~25 fps. Spustiť po každom štarte (alebo dať do `Startup
-Items`) a po prebudení zo spánku; s podržaným Option prepne späť. Log `NV34 CPU.txt` vedľa
-programu. Viac tepla a vyššia spotreba, ventilátor sa riadi sám.
+MiniGL supports two textures at once (GL_ARB_multitexture) and hardware transformation (T&L) in
+`glDrawElements` — vertex positions, clipping and back faces are computed by the GPU.
 
-## Známe obmedzenia
+Under Mac OS 9 the PowerBook 6,2 CPU runs at ~765 MHz instead of 1 GHz: the bus stays at 102 MHz
+(Mac OS 9 does not switch speeds on this model). Games with heavy logic (Wolfenstein, MOHAA) are CPU bound.
+**NV34 CPU** switches the bus to the higher speed (KeyLargo GPIO, like Linux): CPU ~905 MHz,
+RAM reads +22 %, Wolfenstein ~22 → ~25 fps. Run it after every boot (or put it into `Startup
+Items`) and after waking from sleep; with Option held down it switches back. Log `NV34 CPU.txt` next to
+the program. More heat and higher power draw; the fan regulates itself.
 
-- **Half-Life** pri prepnutí na nižšie rozlíšenie (640×480) zamrzne — chyba portu (aj s Apple OpenGL).
-- **Quake III**: raz po studenom štarte zaseknutie GPU hneď pri spustení („hw_sync: GPU nedobehol
-  do 2 s“ v logu); neopakovalo sa. Pri zamrznutí reštart a znova.
-- MiniGL nemá: stencil buffer (tiene `cg_shadows 2`), `glClipPlane` (zrkadlá/portály),
-  `glDrawPixels`/`glBitmap`, display listy. Hmla (GL_FOG) len pri HW T&L — geometria kreslená
-  inak (napr. s polygon offset) je bez hmly.
-- Škálované režimy 800×600 a 640×480 sú rozmazané (FP scaler panelu).
+## Known limitations
 
-## Záchrana
+- **Half-Life** freezes when switching to a lower resolution (640×480) — a bug in the port (also with Apple OpenGL).
+- **Quake III**: once after a cold boot the GPU hung right at launch ("hw_sync: GPU did not finish
+  within 2 s" in the log); it did not happen again. On a freeze, restart and try again.
+- MiniGL lacks: stencil buffer (`cg_shadows 2` shadows), `glClipPlane` (mirrors/portals),
+  `glDrawPixels`/`glBitmap`, display lists. Fog (GL_FOG) only with HW T&L — geometry drawn
+  otherwise (e.g. with polygon offset) has no fog.
+- The scaled modes 800×600 and 640×480 are blurry (the panel's FP scaler).
 
-- **Shift pri štarte driver NEvypne.** V Open Firmware (Cmd-Option-O-F):
-  `setenv boot-args nv34off` a `boot` → NV34 NDRV sa nenaviaže (Apple framebuffer).
-  Zrušenie: `set-default boot-args`.
-- `nv34noaccel` vypne 2D akceleráciu NV34 QD Accel, `nv34no3d` 3D (RAVE aj MiniGL).
-- Odinštalovanie: súbory z Extensions a z priečinkov hier vymazať.
+## Recovery
 
-## Diagnostika (boot-args)
+- **Holding Shift at boot does NOT disable the driver.** In Open Firmware (Cmd-Option-O-F):
+  `setenv boot-args nv34off` and `boot` → NV34 NDRV does not bind (Apple framebuffer).
+  To undo: `set-default boot-args`.
+- `nv34noaccel` turns off the NV34 QD Accel 2D acceleration, `nv34no3d` turns off 3D (both RAVE and MiniGL).
+- Uninstall: delete the files from Extensions and from the game folders.
 
-Viac volieb naraz oddeliť medzerou: `setenv boot-args "nv34glstats nv34gldebug"`, potom `reset-all`.
+## Diagnostics (boot-args)
 
-| boot-args | Komponent | Účinok |
+Separate several options with a space: `setenv boot-args "nv34glstats nv34gldebug"`, then `reset-all`.
+The MiniGL flags (`nv34gl…`) are easier to set in the `NV34 MiniGL config` file.
+
+| boot-args | Component | Effect |
 |---|---|---|
-| `nv34off` | NDRV | driver sa nenaviaže |
-| `nv34noaccel` / `nv34no3d` | QD Accel | bez 2D akcelerácie / bez 3D |
-| `nv34filelog` | RAVE | log do `Preferences:NV34 RAVE live.txt` |
-| `nv34trace` | RAVE | Caps Lock = záznam jednej snímky do logu |
-| `nv34z16`, `nv34no2x`, `nv34immediate`, `nv34raveati`, `nv34tex16swap` | RAVE | testovacie prepínače |
-| `nv34glstats` | MiniGL | každých 250 snímok fps a rozdelenie času do logu |
-| `nv34gldebug` | MiniGL | podrobný log (pixel formát, každá výmena snímky) |
-| `nv34gltex` | MiniGL | log textúr a dávok (prvých 3000 riadkov) |
-| `nv34glvtx12`, `nv34glcolorle` | MiniGL | pôvodný formát vrcholov / opačné poradie bajtov farby |
-| `nv34glnomt` | MiniGL | bez multitextúry |
-| `nv34glnotnl` | MiniGL | bez HW T&L (transformácia na CPU) |
-| `nv34glnofog` | MiniGL | bez hmly (GL_FOG) |
-| `nv34glz24` | MiniGL | vždy 24-bitový z-buffer (inak Z16 pri 16 bpp, ak hra pýta ≤ 16 bitov) |
+| `nv34off` | NDRV | the driver does not bind |
+| `nv34noaccel` / `nv34no3d` | QD Accel | no 2D acceleration / no 3D |
+| `nv34filelog` | RAVE | log to `Preferences:NV34 RAVE live.txt` |
+| `nv34trace` | RAVE | Caps Lock = record one frame into the log |
+| `nv34z16`, `nv34no2x`, `nv34immediate`, `nv34raveati`, `nv34tex16swap` | RAVE | test switches |
+| `nv34glshowfps` | MiniGL | fps counter in the top left corner |
+| `nv34glnofps` / `nv34glfps30` / `nv34glfps75` | MiniGL | no fps limit / at most 30 / at most 75 fps |
+| `nv34glqueue` | MiniGL | frames may queue up (the mouse may lag) |
+| `nv34glstats` | MiniGL | fps and a time breakdown in the log every 250 frames |
+| `nv34gldebug` | MiniGL | verbose log (pixel format, every buffer swap) |
+| `nv34gltex` | MiniGL | log of textures and batches (first 3000 lines) |
+| `nv34glnoexc` | MiniGL | do not catch crashes (EXCEPTION line in the log) |
+| `nv34glclrhw` | MiniGL | hardware scissored clear (Max Payne cutscenes may flicker) |
+| `nv34glvtx12`, `nv34glcolorle` | MiniGL | the original vertex format / reversed color byte order |
+| `nv34glnomt` | MiniGL | no multitexturing |
+| `nv34glnotnl` | MiniGL | no HW T&L (transformation on the CPU) |
+| `nv34glnofog` | MiniGL | no fog (GL_FOG) |
+| `nv34glz24` | MiniGL | always a 24-bit z-buffer (otherwise Z16 at 16 bpp if the game asks for ≤ 16 bits) |
 
-MiniGL vždy zapisuje stručný log do `Systémová zložka:Preferences:NV34 MiniGL log.txt`
-(načítanie, kontext, zadný buffer, chyby, voľná VRAM pri ukončení).
+MiniGL always writes a short log to `System Folder:Preferences:NV34 MiniGL log.txt`
+(loading, config, context, back buffer, errors, free VRAM at exit).
 
 ## Build
 
@@ -102,5 +113,5 @@ MiniGL vždy zapisuje stručný log do `Systémová zložka:Preferences:NV34 Min
 make release
 ```
 
-Potrebný Retro68 (`~/Retro68-build/toolchain`). Výstup: `dist/NV34 Release.dsk` a `dist/*.bin`.
-Podrobnosti vývoja: [PLAN.md](../PLAN.md), [faza4-opengl.md](faza4-opengl.md).
+Requires Retro68 (`~/Retro68-build/toolchain`). Output: `dist/NV34 Release.dsk` and `dist/*.bin`.
+Development details: [PLAN.md](../PLAN.md), [phase4-opengl.md](phase4-opengl.md).

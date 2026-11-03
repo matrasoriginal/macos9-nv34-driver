@@ -1,123 +1,123 @@
-# Go5200 na Mac OS 9: režimy najprv, 2D neskôr
+# Go5200 on Mac OS 9: display modes first, 2D later
 
-NVIDIA 3.1 z roku 2002 Go5200 nepozná a binárnym doplnením PCI ID sa to nedá opraviť. Reálne je napísať nový minimálny NDRV pre zmenu rozlíšenia a color depth; 2D akceleráciu skúsiť až potom.
+NVIDIA's 3.1 driver from 2002 does not know the Go5200, and adding the PCI ID to the binary cannot fix that. What is realistic is writing a new minimal NDRV for changing resolution and color depth; 2D acceleration comes after that.
 
-## Úlohy
+## Tasks
 
-- [x] Získať z PB 6,2 OF/OS X properties — [docs/faza0-hw.md](docs/faza0-hw.md) (device-id `0329`, BAR0 `0x91000000`, FB `0xa0000000`)
-- [x] Vybrať hotový NDRV — ROM uzla obsahuje iba Apple COFB (nie NVIDIA); OS X kexty netreba, vlastný driver funguje ([docs/faza1.md](docs/faza1.md))
-- [x] Retro68 skeleton: DoDriverIO, TheDriverDescription, match `NVDA,NVMac` + `built-in` + PMC_BOOT_0 = NV34, mapovanie MMIO/FB z Name Registry ([driver/](driver))
-- [x] Implementovať mode list 1024x768/800x600/640x480 @ 8/16/32 bpp cez NV34 CRTC/FP (nouveau dispnv04)
-- [x] Otestovať Monitors CP na hardvéri — 4.0d4 (2026-10-05): rozlíšenia aj hĺbky fungujú; kľúč bol výber hlavy 1 ([docs/faza0-hw.md](docs/faza0-hw.md)). Zostáva: 256-color hra, opakovaný boot v nenatívnom režime
-- [x] Zhodnotiť 2D — [docs/faza3.md](docs/faza3.md): čítanie VRAM ~12 MB/s pri každej šírke prístupu, write-through bez účinku, COFB rovnako pomalý
-- [x] 2A oživenie PFIFO/PGRAPH podľa xf86-video-nv + test `NV34 Accel` — GPU blit 1.2 GB/s vs CPU 8 MB/s (tile regióny z OF ponechať)
-- [x] 2B napojenie na QuickDraw — `NV34 QD Accel` 1.5 (INIT: 68k stub + PPC fragment, patch CopyBits obrazovka→obrazovka vrátane 1-bit aliasu screenBits); čas Findera v CopyBits 25–31 s → 1.2 s
-- [x] Overiť 256 / Thousands / Millions s akceleráciou a prepínanie hĺbky za behu (1.5, 2026-10-14); uspanie na PB 6,2 v OS 9 nefunguje vôbec, netestovateľné
-- [x] Fáza 4 OpenGL ([docs/faza4-opengl.md](docs/faza4-opengl.md)) — M1 ✔ prvé trojuholníky z 3D enginu (gl-3); M2 ✔ textúry, blending, z-buffer (gl-8); M3 NV34 RAVE engine: 32 bpp ✔ (rave-2), 16 bpp ✔ (rave-3/4), M3a ✔ NV34 RAVE engine — UT plne funkčný cez RAVE (rave-24); M4 ✔ NV34 MiniGL — vlastná OpenGLLibrary, Quake II plne funkčný (54 fps timedemo po optimalizácii, minigl-13); UT svetlo opravené (getInt 1011 = 772); M5 ✔ Half-Life cez MiniGL (hl-12); M6 ✔ Quake III cez MiniGL (q3-7, 37 fps timedemo po opt-8)
+- [x] Get the OF/OS X properties from the PB 6,2 — [docs/phase0-hw.md](docs/phase0-hw.md) (device-id `0329`, BAR0 `0x91000000`, FB `0xa0000000`)
+- [x] Pick a ready-made NDRV — the node ROM only contains Apple COFB (not NVIDIA); OS X kexts are not needed, our own driver works ([docs/phase1.md](docs/phase1.md))
+- [x] Retro68 skeleton: DoDriverIO, TheDriverDescription, match `NVDA,NVMac` + `built-in` + PMC_BOOT_0 = NV34, MMIO/FB mapping from the Name Registry ([driver/](driver))
+- [x] Implement the mode list 1024x768/800x600/640x480 @ 8/16/32 bpp via the NV34 CRTC/FP (nouveau dispnv04)
+- [x] Test the Monitors control panel on hardware — 4.0d4 (2026-10-05): resolutions and depths work; the key was selecting head 1 ([docs/phase0-hw.md](docs/phase0-hw.md)). Remaining: a 256-color game, repeated boot in a non-native mode
+- [x] Evaluate 2D — [docs/phase3.md](docs/phase3.md): VRAM reads ~12 MB/s at any access width, write-through has no effect, COFB is just as slow
+- [x] 2A bring up PFIFO/PGRAPH per xf86-video-nv + the `NV34 Accel` test — GPU blit 1.2 GB/s vs CPU 8 MB/s (keep the OF tile regions)
+- [x] 2B hook into QuickDraw — `NV34 QD Accel` 1.5 (INIT: 68k stub + PPC fragment, patches screen→screen CopyBits including the 1-bit screenBits alias); Finder time in CopyBits 25–31 s → 1.2 s
+- [x] Verify 256 / Thousands / Millions with acceleration and depth switching at run time (1.5, 2026-10-14); sleep does not work at all on the PB 6,2 under OS 9, so it cannot be tested
+- [x] Phase 4 OpenGL ([docs/phase4-opengl.md](docs/phase4-opengl.md)) — M1 ✔ first triangles from the 3D engine (gl-3); M2 ✔ textures, blending, z-buffer (gl-8); M3 NV34 RAVE engine: 32 bpp ✔ (rave-2), 16 bpp ✔ (rave-3/4), M3a ✔ NV34 RAVE engine — UT fully working through RAVE (rave-24); M4 ✔ NV34 MiniGL — our own OpenGLLibrary, Quake II fully working (54 fps timedemo after optimization, minigl-13); UT lighting fixed (getInt 1011 = 772); M5 ✔ Half-Life through MiniGL (hl-12); M6 ✔ Quake III through MiniGL (q3-7, 37 fps timedemo after opt-8)
 
-## Verdikt
+## Verdict
 
-**Pridať podporu do existujúceho [NVIDIA Driver](NVIDIA-v3.1-2002/NVIDIA%20Driver) (v3.1, marec 2002) sa nedá.** Balík je čistá PowerPC PEF binárka bez zdrojov. GeForce FX Go5200 (NV34M) vyšla až v roku 2003 — driver končí na GeForce4 / NV17–NV25. OpenGL ICD nemá FX/NV34 cesty, Resource Manager číta chip ID z `PMC.boot0` a pre NV34 (`0x034x`) nemá init.
+**Adding support to the existing [NVIDIA Driver](NVIDIA-v3.1-2002/NVIDIA%20Driver) (v3.1, March 2002) is not possible.** The package is a plain PowerPC PEF binary without sources. The GeForce FX Go5200 (NV34M) only came out in 2003 — the driver ends at the GeForce4 / NV17–NV25. The OpenGL ICD has no FX/NV34 paths, and the Resource Manager reads the chip ID from `PMC.boot0` and has no init for NV34 (`0x034x`).
 
-Náhodné `0x0324` v binárke (za stringom `panelinfo`) nie je tabuľka PCI ID. Na PowerBook 6,2 je karta typicky **`10DE:0329`**, nie `0324` ([XFree86 report](https://www.spinics.net/lists/xfree86/msg01952.html)).
+The stray `0x0324` in the binary (after the `panelinfo` string) is not a PCI ID table. On the PowerBook 6,2 the card is typically **`10DE:0329`**, not `0324` ([XFree86 report](https://www.spinics.net/lists/xfree86/msg01952.html)).
 
-OS X driver (NVDAResman + NVDANV30Hal) **nejde** preložiť na OS 9. Je to IOKit kext, nie `ndrv`. Dá sa použiť len ako referencia registrov.
+The OS X driver (NVDAResman + NVDANV30Hal) **cannot** be rebuilt for OS 9. It is an IOKit kext, not an `ndrv`. It can only serve as a register reference.
 
-Komunita to isté riešila pri ATI (darthnVader / Jasper NDRV): **nový alebo extrahovaný NDRV dá režimy bez akcelerácie**. Pre Go5200 na PB 6,2 to doteraz nikto nedodal — na macos9lives ostali na Thousands of colours.
+The community solved the same thing for ATI (darthnVader / Jasper NDRV): **a new or extracted NDRV gives display modes without acceleration**. Nobody had delivered that for the Go5200 in the PB 6,2 — on macos9lives they stayed at Thousands of colors.
 
-Dôležité rozlíšenie:
+An important distinction:
 
-- **Zmena rozlíšenia / color depth** = Video Driver API (`cscSwitch`, `cscGetModeTiming`, `cscSetEntries`) v NDRV. QuickDraw 2D na to netreba.
-- **2D akcelerácia** = samostatný INIT (`NVIDIA 2D Acceleration`) + Resource Manager, ktorý musí vedieť NV34 2D objekty (`0x0362` surf2d). To 3.1 nemá.
+- **Changing resolution / color depth** = the Video Driver API (`cscSwitch`, `cscGetModeTiming`, `cscSetEntries`) in the NDRV. QuickDraw 2D is not needed for that.
+- **2D acceleration** = a separate INIT (`NVIDIA 2D Acceleration`) + the Resource Manager, which would have to know the NV34 2D objects (`0x0362` surf2d). 3.1 does not.
 
 ```mermaid
 flowchart TD
-  monitors[Monitors_CP] --> ndrv[Novy_NDRV]
+  monitors[Monitors_CP] --> ndrv[New_NDRV]
   ndrv --> crtc[NV34_CRTC_FP]
   crtc --> lcd[LCD_1024x768]
   accel2d[NVIDIA_2D_INIT] --> rm[NVIDIA_RM_3_1]
-  rm -->|nepozná NV34| fail[Hang_alebo_ignor]
+  rm -->|does not know NV34| fail[Hang_or_ignored]
 ```
 
-Balík [NVIDIA-v3.1-2002](NVIDIA-v3.1-2002/) **nainštalovať na PB 6,2 netreba** — RM môže pri neznámom chipclass hangnúť. Režimy pôjdu cez nový extension.
+The [NVIDIA-v3.1-2002](NVIDIA-v3.1-2002/) package **should not be installed on the PB 6,2** — the RM may hang on an unknown chip class. Display modes come from the new extension.
 
-## Fáza 0 — dump z hardvéru
+## Phase 0 — hardware dump
 
-Na PowerBooku v Open Firmware (alebo z OS X):
+On the PowerBook in Open Firmware (or from OS X):
 
 ```
 dev agp/@10/@0 .properties
 ```
 
-(prípadne `dev pci` a nájsť `NVDA` / `display`)
+(or `dev pci` and look for `NVDA` / `display`)
 
-Potrebné properties:
+Properties needed:
 
-- `vendor-id` / `device-id` (očakávané `10de` / `0329` alebo `0328`/`0324`)
-- `compatible` (`NVDA,NVMac` a pod.)
+- `vendor-id` / `device-id` (expected `10de` / `0329` or `0328`/`0324`)
+- `compatible` (`NVDA,NVMac` etc.)
 - `assigned-addresses` (MMIO + FB)
 - `AAPL,address`, `width`, `height`, `depth`, `linebytes`
 - `EDID` / `display-cfg` / `NVDA,Display-A`
 - `backlight-control`
 
-Tieto hodnoty pôjdu do NDRV ako mode list a mapovanie registrov. Bez nich sa dá začať so známymi defaultmi 12" panelu (1024×768), ale matchovanie karty musí rozpoznať skutočné PCI ID.
+These values go into the NDRV as the mode list and register mapping. Without them we could start with the known defaults of the 12" panel (1024×768), but matching the card has to recognize the real PCI ID.
 
-## Fáza 1 — rýchly pokus: OS X NDRV fragment
+## Phase 1 — quick attempt: an OS X NDRV fragment
 
-ATI cesta (vybrať `driver,AAPL,MacOS,PowerPC` z OS X kextu a dať do Extensions) pri NVIDII často zlyhá, lebo diskový NVIDIA NDRV volá **ResMan**. Stojí to ale za jeden test:
+The ATI approach (take `driver,AAPL,MacOS,PowerPC` from an OS X kext and put it into Extensions) often fails for NVIDIA because the on-disk NVIDIA NDRV calls **ResMan**. It is still worth one test:
 
-- Z OS X 10.3.9 / 10.4 na tom istom stroji vybrať fragmenty z `GeForce.kext` / `NVDA*.kext` (katalóg [elliotnunn/x-ndrv](https://github.com/elliotnunn/x-ndrv)).
-- Skopírovať do OS 9 `Extensions`, NVIDIA 3.1 **nedávať**.
-- Ak Monitors CP začne ponúkať režimy, hotovo pre fázu 1.
-- Ak driver nenačíta ResMan a zlyhá, pokračovať fázou 2.
+- From OS X 10.3.9 / 10.4 on the same machine, extract the fragments from `GeForce.kext` / `NVDA*.kext` (catalog: [elliotnunn/x-ndrv](https://github.com/elliotnunn/x-ndrv)).
+- Copy them into the OS 9 `Extensions`, **without** NVIDIA 3.1.
+- If the Monitors control panel starts offering modes, phase 1 is done.
+- If the driver fails because ResMan is missing, continue with phase 2.
 
-## Fáza 2 — nový minimálny NDRV (hlavná cesta)
+## Phase 2 — a new minimal NDRV (the main path)
 
-Nový PowerPC PEF `ndrv` / `vido` (šablóna: [QemuMacDrivers qemu_vga.ndrv](https://github.com/qemu/qemu) / Apple Native Driver docs, API z `Video.h`).
+A new PowerPC PEF `ndrv` / `vido` (template: [QemuMacDrivers qemu_vga.ndrv](https://github.com/ozbenh/QemuMacDrivers) / Apple Native Driver docs, API from `Video.h`).
 
-Build: [Retro68](https://github.com/autc04/Retro68) na tomto Macu (cross-compile PEF), nie patchovanie 3.1.
+Build: [Retro68](https://github.com/autc04/Retro68) on this Mac (cross-compiled PEF), not patching 3.1.
 
-Driver bude:
+The driver will:
 
-1. **Match** cez Name Registry: `device-id` Go5200 + `NVDA,NVMac` / `device_type=display`.
-2. Namapovať MMIO (`assigned-addresses`) a framebuffer.
-3. Implementovať minimálnu množinu volaní, ktorú Monitors CP a hry potrebujú:
+1. **Match** via the Name Registry: Go5200 `device-id` + `NVDA,NVMac` / `device_type=display`.
+2. Map the MMIO (`assigned-addresses`) and the framebuffer.
+3. Implement the minimal set of calls that the Monitors control panel and games need:
    - `cscGetConnection`, `cscGetNextResolution`, `cscGetModeTiming`, `cscGetCurMode`
    - `cscSwitch` / `cscSetMode`
    - `cscGetBaseAddr`, `cscGrayPage`
-   - `cscSetEntries` / `cscDirectSetEntries` (256 farieb)
-   - voliteľne `cscSetGamma`, `cscGetPreferredConfiguration`
-4. **Mode list pre interný 12" panel:** 1024×768, 800×600, 640×480 @ 8 / 16 / 32 bpp. Scaled módy cez NV34 FP scaler (nouveau `dispnv04` — NV04 až NV36 zdieľajú display engine). XFree86 `nv` na tomto chipseti (`0x0329`) už režimy vedel bez špecifického ID.
-5. Color depth: prepis `CRTC` pitch/offset + formát framebufferu; 8-bit cez NVIDIA CLUT (PRAMDAC).
-6. Obaliť ako OS 9 extension: `cfrg` (pwpc), `vers`, `TheDriverDescription` (`ndrv`+`vido`), rovnaký vzor ako v [NVIDIA Driver](NVIDIA-v3.1-2002/NVIDIA%20Driver) (`mtej` + `NVDA,NVMac` + `Display_NV`).
+   - `cscSetEntries` / `cscDirectSetEntries` (256 colors)
+   - optionally `cscSetGamma`, `cscGetPreferredConfiguration`
+4. **Mode list for the internal 12" panel:** 1024×768, 800×600, 640×480 @ 8 / 16 / 32 bpp. Scaled modes through the NV34 FP scaler (nouveau `dispnv04` — NV04 through NV36 share the display engine). XFree86 `nv` already handled modes on this chipset (`0x0329`) without a specific ID.
+5. Color depth: rewrite the `CRTC` pitch/offset + framebuffer format; 8-bit through the NVIDIA CLUT (PRAMDAC).
+6. Package it as an OS 9 extension: `cfrg` (pwpc), `vers`, `TheDriverDescription` (`ndrv`+`vido`), the same pattern as in [NVIDIA Driver](NVIDIA-v3.1-2002/NVIDIA%20Driver) (`mtej` + `NVDA,NVMac` + `Display_NV`).
 
-Hardvérová referencia (nie kód na OS 9):
+Hardware reference (not code for OS 9):
 
 - nouveau `drivers/gpu/drm/nouveau/dispnv04/` (CRTC, DAC, FP, overlay)
 - envytools / nv34 docs
-- OS X `NVDANV30Hal` len na porovnanie init/PLL, ak bude treba
+- OS X `NVDANV30Hal` only for comparing init/PLL, if needed
 
-Repo po implementácii: zdroj NDRV + Retro68 Makefile + návod na inštaláciu do `Extensions`. Pôvodný 3.1 balík ostane ako referencia, nebude sa patchovať.
+The repo after implementation: NDRV sources + Retro68 Makefile + instructions for installing into `Extensions`. The original 3.1 package stays as a reference and will not be patched.
 
-## Test na stroji
+## Testing on the machine
 
-1. NVIDIA 3.1 / ATI extensions vypnuté.
-2. Nový NDRV do `System Folder:Extensions`, restart.
-3. Monitors CP: Millions, Thousands, 256; 1024×768 a aspoň jeden scaled mód.
-4. Hra alebo app, ktorá vyžaduje 256 farieb / iné rozlíšenie.
-5. Ak obraz zmizne: Extensions Off, NDRV preč — OF framebuffer ostane ako záchrana.
+1. NVIDIA 3.1 / ATI extensions disabled.
+2. New NDRV into `System Folder:Extensions`, restart.
+3. Monitors control panel: Millions, Thousands, 256; 1024×768 and at least one scaled mode.
+4. A game or application that needs 256 colors / another resolution.
+5. If the picture disappears: Extensions Off, remove the NDRV — the OF framebuffer remains as a fallback.
 
-## Fáza 3 — 2D akcelerácia (až po režimoch)
+## Phase 3 — 2D acceleration (only after the display modes)
 
-Až bude NDRV stabilný, zhodnotiť 2D. Realisticky:
+Once the NDRV is stable, evaluate 2D. Realistically:
 
-- **Patch 3.1 RM na NV34: veľmi nepravdepodobné.** Iný chipclass, iný graph engine, iné 2D class IDs.
-- **Vlastný 2D INIT** (surf2d/gdi blit cez MMIO, podľa nouveau `nv34_graph`) je samostatný projekt: FIFO, channels, context, endian. Bez toho ostane QuickDraw softvérový — OS 9 na G4 1 GHz je použiteľný, hry pomalšie.
-- OpenGL / DVD z 3.1 pre FX **nesľubovať**.
+- **Patching the 3.1 RM for NV34: very unlikely.** Different chip class, different graphics engine, different 2D class IDs.
+- **Our own 2D INIT** (surf2d/gdi blit via MMIO, per nouveau `nv34_graph`) is a separate project: FIFO, channels, context, endianness. Without it QuickDraw stays in software — OS 9 on a 1 GHz G4 is usable, games are slower.
+- **Do not promise** OpenGL / DVD from 3.1 for the FX.
 
-## Riziká
+## Risks
 
-- Zlý CRTC/PLL program = čierny LCD (odstrániť extension).
-- Backlight (`mnca` vs `ati`) je samostatný problém; NDRV ho nemusí riešiť v prvej verzii.
-- Externý mini-DVI / dual display je mimo prvého cieľa.
-- Bez dumpnutého `device-id` sa NDRV nemusí na kartu naviazať.
+- A wrong CRTC/PLL setup = black LCD (remove the extension).
+- Backlight (`mnca` vs `ati`) is a separate problem; the NDRV does not have to handle it in the first version.
+- External mini-DVI / dual display is outside the first goal.
+- Without the dumped `device-id` the NDRV might not bind to the card.

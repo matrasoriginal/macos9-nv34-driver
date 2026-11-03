@@ -1,15 +1,15 @@
 /*
- * NV34 CPU — prepne PowerBook6,2 pod Mac OS 9 na plný takt (1 GHz).
+ * NV34 CPU — switches the PowerBook6,2 under Mac OS 9 to its full clock (1 GHz).
  *
- * cpu-1: firmware nechá zbernicu na 102 MHz (bus-frequencies 133,12 / 102 MHz, procesor ×7,5) →
- * procesor ~765 MHz. Mac OS X ju prepne, Mac OS 9 na tomto modeli o tom nevie. Prepnutie je ako
- * v Linuxe (cpufreq_32.c, gpios_set_cpu_speed) cez GPIO KeyLargo:
- *   hore:  voltage-gpio = 0x05, 10 ms; frequency-gpio = 0x05, 200 µs; čakať na slewing-done (bit 0x02)
- *   dole:  frequency-gpio = 0x04, čakať na slewing-done; voltage-gpio = 0x04, 10 ms
- * GPIO bajt: 0x04 = výstup zapnutý, 0x01 = výstupná hodnota, 0x02 = vstupná úroveň.
+ * cpu-1: the firmware leaves the bus at 102 MHz (bus-frequencies 133.12 / 102 MHz, CPU ×7.5) →
+ * CPU ~765 MHz. Mac OS X switches it, Mac OS 9 on this model does not know about it. The switch works as
+ * in Linux (cpufreq_32.c, gpios_set_cpu_speed) via KeyLargo GPIO:
+ *   up:    voltage-gpio = 0x05, 10 ms; frequency-gpio = 0x05, 200 µs; wait for slewing-done (bit 0x02)
+ *   down:  frequency-gpio = 0x04, wait for slewing-done; voltage-gpio = 0x04, 10 ms
+ * GPIO byte: 0x04 = output enabled, 0x01 = output value, 0x02 = input level.
  *
- * Spustenie prepne na plný takt, s podržaným Option späť na znížený. Log "NV34 CPU.txt" vedľa
- * aplikácie (pripisuje). Do Startup Items sa dá dať na prepnutie pri každom štarte.
+ * Running it switches to the full clock, with Option held down back to the reduced one. Log "NV34 CPU.txt" next to
+ * the application (appended). Can be put into Startup Items to switch on every boot.
  */
 #include <stdio.h>
 #include <stdarg.h>
@@ -40,11 +40,11 @@ static void out(const char *fmt, ...)
         va_start(ap, fmt);
         vfprintf(gLog, fmt, ap);
         va_end(ap);
-        fflush(gLog);                               /* log musí prežiť zamrznutie pri prepnutí */
+        fflush(gLog);                               /* the log must survive a freeze during the switch */
     }
 }
 
-/* vlastnosť uzla (prvé slová) */
+/* node property (first words) */
 static int prop(const char *path, const char *name, UInt32 *v, UInt32 n)
 {
     RegEntryID e;
@@ -74,7 +74,7 @@ static void delay_us(UInt32 us)
         ;
 }
 
-/* rozdiel slučiek s 12 a 4 závislými sčítaniami = 8 taktov na iteráciu (ako MiniGL q3-14) */
+/* difference of loops with 12 and 4 dependent adds = 8 cycles per iteration (like MiniGL q3-14) */
 static UInt32 loop_tb_n(int twelve, long n)
 {
     UInt32 t0, t1, x = 1;
@@ -104,8 +104,8 @@ static UInt32 cpu_mhz(void)
     return b > a ? (UInt32)(8.0 * gTbFreq / (b - a)) : 0;
 }
 
-/* cpu-4: najrýchlejšia z 300 krátkych slučiek (~50 µs) — bez prerušení; rozdiel voči cpu_mhz =
- * čas, ktorý berú prerušenia */
+/* cpu-4: fastest of 300 short loops (~50 µs) — without interrupts; the difference to cpu_mhz =
+ * time taken by interrupts */
 static UInt32 cpu_mhz_min(void)
 {
     UInt32 a = 0xffffffff, b = 0xffffffff, t;
@@ -127,7 +127,7 @@ static void gpio_w(volatile UInt8 *p, UInt8 v)
     __asm__ volatile("eieio\n sync" ::: "memory");
 }
 
-/* cpu-3: timebase voči TickCount (VIA, nezávislé od zbernice) za 1 s → skutočné tb/s */
+/* cpu-3: timebase against TickCount (VIA, independent of the bus) over 1 s → real tb/s */
 static UInt32 tb_per_sec(void)
 {
     UInt32 t, t0, b0;
@@ -138,10 +138,10 @@ static UInt32 tb_per_sec(void)
     b0 = tb();
     while (TickCount() - t0 < 60)
         ;
-    return (UInt32)((double)(tb() - b0) * 60.15 / 60.0);   /* tick = 1/60,15 s */
+    return (UInt32)((double)(tb() - b0) * 60.15 / 60.0);   /* tick = 1/60.15 s */
 }
 
-/* čítanie 4 MB z RAM (zbernica + pamäť), MB/s podľa skutočných tb/s */
+/* reads 4 MB from RAM (bus + memory), MB/s based on the real tb/s */
 static UInt32 *gMem;
 #define MEM_WORDS (1u << 19)                       /* 2 MB (L2 512 KB) */
 
@@ -154,8 +154,8 @@ static UInt32 mem_mbs(UInt32 tbs)
     t0 = tb();
     for (k = 0; k < 4; k++)
         for (i = 0; i < MEM_WORDS; i += 8)
-            sum += gMem[i];                         /* jedno slovo na 32 B riadok cache */
-    /* 4 prechody × 2 MB */
+            sum += gMem[i];                         /* one word per 32 B cache line */
+    /* 4 passes × 2 MB */
     sink = sum;
     (void)sink;
     return (UInt32)(4.0 * 2.0 * tbs / (double)(tb() - t0));
@@ -169,7 +169,7 @@ static void state(const char *when)
         mn > mhz ? (mn - mhz) * 100 / mn : 0, tbs, mem_mbs(tbs), *gFreq, *gVolt, *gSlew);
 }
 
-/* čaká na slewing-done (bit 0x02), max. 100 ms; vráti µs alebo 0 pri timeoute */
+/* waits for slewing-done (bit 0x02), max. 100 ms; returns µs or 0 on timeout */
 static UInt32 wait_slew(void)
 {
     UInt32 t0 = tb(), us;
@@ -183,19 +183,19 @@ static UInt32 wait_slew(void)
     }
 }
 
-/* GPIO uzol → adresa (reg je posun voči 0x50, Linux read_gpio) */
+/* GPIO node → address (reg is an offset from 0x50, Linux read_gpio) */
 static volatile UInt8 *gpio_addr(UInt32 macio, const char *name, UInt32 expect)
 {
     char path[96];
     UInt32 reg, off;
     sprintf(path, DT "pci:mac-io:gpio:%s", name);
     if (!prop(path, "reg", &reg, 1)) {
-        out("uzol %s nenajdeny\n", path);
+        out("node %s not found\n", path);
         return 0;
     }
     off = reg < 0x50 ? reg + 0x50 : reg;
     if (off != expect) {
-        out("%s: reg %lx -> +%02lx, ocakavane +%02lx — nemenim nic\n", name, reg, off, expect);
+        out("%s: reg %lx -> +%02lx, expected +%02lx — changing nothing\n", name, reg, off, expect);
         return 0;
     }
     return (volatile UInt8 *)(macio + off);
@@ -215,13 +215,13 @@ static int run(void)
     out("model \"%s\"\n", (char *)model);
     if (!prop(DT "cpus:PowerPC,G4", "bus-frequencies", bus, 2) ||
         !prop(DT "cpus:PowerPC,G4", "processor-to-bus-ratio*2", &ratio, 1) || !ratio) {
-        out("procesor nema bus-frequencies / processor-to-bus-ratio*2 — prepinanie zbernicou nie je\n");
+        out("CPU has no bus-frequencies / processor-to-bus-ratio*2 — no bus switching\n");
         return 0;
     }
-    out("zbernica %lu / %lu Hz, nasobok %lu/2 -> %lu / %lu MHz\n", bus[0], bus[1], ratio,
+    out("bus %lu / %lu Hz, multiplier %lu/2 -> %lu / %lu MHz\n", bus[0], bus[1], ratio,
         (UInt32)((double)bus[0] * ratio / 2e6), (UInt32)((double)bus[1] * ratio / 2e6));
     if (!prop(DT "pci:mac-io", "AAPL,address", &macio, 1) || !macio) {
-        out("mac-io AAPL,address nenajdene\n");
+        out("mac-io AAPL,address not found\n");
         return 0;
     }
     gFreq = gpio_addr(macio, "frequency-gpio", 0x6a);
@@ -232,50 +232,50 @@ static int run(void)
 
     {
         OSErr err;
-        Handle h = TempNewHandle(MEM_WORDS * 4, &err);   /* halda aplikácie je malá (cpu-3: 0 MB/s) */
+        Handle h = TempNewHandle(MEM_WORDS * 4, &err);   /* the application heap is small (cpu-3: 0 MB/s) */
         if (h) {
             HLock(h);
             gMem = (UInt32 *)*h;
         } else {
             gMem = (UInt32 *)NewPtr(MEM_WORDS * 4);
         }
-        out("pamat na meranie RAM: %s\n", gMem ? "ok" : "nie je");
+        out("memory for the RAM test: %s\n", gMem ? "ok" : "none");
     }
     EventAvail(0, &ev);
     low = (ev.modifiers & 0x0800) != 0;             /* optionKey */
-    state("pred");
+    state("before");
     if (!low) {
         UInt32 us;
         if (*gFreq & 0x01) {
-            out("uz na plnom takte\n");
-            state("o 2 s");
+            out("already at full clock\n");
+            state("+2 s");
             return 1;
         }
-        gpio_w(gVolt, 0x05);                        /* najprv vyššie napätie */
+        gpio_w(gVolt, 0x05);                        /* raise the voltage first */
         delay_us(10000);
         gpio_w(gFreq, 0x05);
         delay_us(200);
         us = wait_slew();
         if (us)
-            out("plny takt: slewing-done po %lu us\n", us);
+            out("full clock: slewing-done after %lu us\n", us);
         else
-            out("plny takt: slewing-done do 100 ms neprislo\n");
+            out("full clock: slewing-done did not arrive within 100 ms\n");
     } else {
         UInt32 us;
         if (!(*gFreq & 0x01) && !(*gVolt & 0x01)) {
-            out("uz na znizenom takte\n");
+            out("already at reduced clock\n");
             return 1;
         }
         gpio_w(gFreq, 0x04);
         delay_us(200);
         us = wait_slew();
-        out("znizeny takt: slewing-done %s %lu us\n", us ? "po" : "neprislo,", us);
-        gpio_w(gVolt, 0x04);                        /* napätie až po znížení frekvencie */
+        out("reduced clock: slewing-done %s %lu us\n", us ? "after" : "did not arrive,", us);
+        gpio_w(gVolt, 0x04);                        /* voltage only after lowering the frequency */
         delay_us(10000);
     }
-    state("po");
-    state("o 2 s");
-    state("o 4 s");
+    state("after");
+    state("+2 s");
+    state("+4 s");
     return 1;
 }
 
@@ -289,7 +289,7 @@ int main(void)
     run();
     if (gLog)
         fclose(gLog);
-    printf("(klik ukonci, inak sam o 10 s)\n");
+    printf("(click to quit, otherwise quits by itself in 10 s)\n");
     {
         UInt32 t0 = TickCount();
         while (!Button() && TickCount() - t0 < 10 * 60)

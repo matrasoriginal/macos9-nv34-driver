@@ -1,15 +1,15 @@
 /*
- * NV34 GL Test — prvý trojuholník z 3D enginu GeForce FX Go5200 (rankine 0x0697) v OS 9.
+ * NV34 GL Test — the first triangle from the GeForce FX Go5200 3D engine (rankine 0x0697) on OS 9.
  *
- * Postup: 2D init (nva_init_engine) → 3D init (accel/nv34_3d.c: PGRAPH kontext podľa
- * nouveau, stav podľa xf86-video-nouveau) → 4 varianty kreslenia, každý overený spätným
- * čítaním pixelov:
- *   gl-3: kreslí iba cesta cez register combiners; farby LE (červená → 0000ffff).
- *   gl-4: 3D objekt s/bez big-endian príznaku; v každom červený trojuholník (combiners =
- *         primárna farba) a štvorec so šachovnicovou textúrou (FP txph + combiners tex × farba).
+ * Procedure: 2D init (nva_init_engine) → 3D init (accel/nv34_3d.c: PGRAPH context per
+ * nouveau, state per xf86-video-nouveau) → 4 drawing variants, each verified by reading
+ * the pixels back:
+ *   gl-3: only the register combiner path draws; colors are LE (red → 0000ffff).
+ *   gl-4: 3D object with/without the big-endian flag; in each a red triangle (combiners =
+ *         primary color) and a square with a checkerboard texture (FP txph + combiners tex × color).
  *
- * Spúšťať BEZ NV34 QD Accel (Shift pri štarte alebo boot-args nv34noaccel) — test
- * prestaví engine. Log "NV34 GL.txt" sa zapisuje po riadkoch.
+ * Run WITHOUT NV34 QD Accel (Shift at boot or boot-args nv34noaccel) — the test
+ * reconfigures the engine. The log "NV34 GL.txt" is written line by line.
  */
 #include <Quickdraw.h>
 #include <Windows.h>
@@ -164,17 +164,17 @@ int main(void)
     TextFont(kFontIDMonaco);
     TextSize(9);
 
-    log_line("NV34 GL Test 8  (vymazanie z-buffera; ocakavane modra ff0000ff cervena ffff0000 zelena ff00ff00)");
+    log_line("NV34 GL Test 8  (z-buffer clear; expected blue ff0000ff red ffff0000 green ff00ff00)");
     spm = (**GetMainDevice()).gdPMap;
     bpp = (**spm).pixelSize;
     rowBytes = (**spm).rowBytes & 0x3fff;
     fb = (volatile NVU8 *)(**spm).baseAddr;
     if (bpp != 32) {
-        log_line("CHYBA: prepni na Millions (32 bpp), teraz %d bpp", bpp);
+        log_line("ERROR: switch to Millions (32 bpp), currently %d bpp", bpp);
         goto done;
     }
     if (!find_hw(&mmio, &vram, &vramSize)) {
-        log_line("CHYBA: NVDA,Parent / BAR nenajdene");
+        log_line("ERROR: NVDA,Parent / BAR not found");
         goto done;
     }
     fbOffset = (NVU32)(fb - vram);
@@ -210,18 +210,18 @@ int main(void)
     err = nv3d_init(&g, &a, fbOffset, rowBytes, (**spm).bounds.right, (**spm).bounds.bottom);
     log_line("3D init: %s  ctx_user %08lx  PGRAPH st %08lx", err ? "TIMEOUT" : "OK",
              nva_rd32(&a, 0x400148), nva_rd32(&a, 0x400700));
-    report_trap(&g, "po inite");
+    report_trap(&g, "after init");
     if (err) {
         nva_shutdown(&a);
         goto done;
     }
 
     nv3d_object_be(&g, 1);
-    nv3d_upload_fp(&g, fpMovH0, 4, 1);          /* gl-5: kódovanie 1 pri BE objekte */
+    nv3d_upload_fp(&g, fpMovH0, 4, 1);          /* gl-5: encoding 1 with the BE object */
     nv3d_use_fp(&g, 0x00000000, 0x0001000f);
-    nv3d_rc_final(&g, 0x04);                    /* final = primárna farba */
+    nv3d_rc_final(&g, 0x04);                    /* final = primary color */
 
-    /* --- A: vymazanie z-buffera (gl-7: CLEAR dal 12345678 → 00000078) --- */
+    /* --- A: z-buffer clear (gl-7: CLEAR gave 12345678 → 00000078) --- */
     {
         static const struct { NVU32 value; int we; } cv[4] = {
             { 0xffffff00, 1 }, { 0xffffffff, 0 }, { 0xffffffff, 1 }, { 0x00ffffff, 1 } };
@@ -239,12 +239,12 @@ int main(void)
             zc = *(volatile NVU32 *)(zb + zoff);
 
             nv3d_depth(&g, 1, F1);
-            nv3d_rect_z(&g, x, y, 100, 60, 0x3f400000, 0, F1, 0, F1);          /* zelený z=0.75 */
-            nv3d_rect_z(&g, x + 30, y, 40, 60, 0x3e800000, F1, 0, 0, F1);      /* červený z=0.25 */
-            nv3d_rect_z(&g, x + 15, y + 20, 85, 20, 0x3f000000, 0, 0, F1, F1); /* modrý z=0.5 */
+            nv3d_rect_z(&g, x, y, 100, 60, 0x3f400000, 0, F1, 0, F1);          /* green z=0.75 */
+            nv3d_rect_z(&g, x + 30, y, 40, 60, 0x3e800000, F1, 0, 0, F1);      /* red z=0.25 */
+            nv3d_rect_z(&g, x + 15, y + 20, 85, 20, 0x3f000000, 0, 0, F1, F1); /* blue z=0.5 */
             nv3d_depth(&g, 0, F1);
             err = nva_sync(&a, 60);
-            log_line("clear %08lx write %d: zeta %08lx  -> modra %08lx cervena %08lx zelena %08lx%s",
+            log_line("clear %08lx write %d: zeta %08lx  -> blue %08lx red %08lx green %08lx%s",
                      cv[k].value, cv[k].we, zc, pixel(fb, rowBytes, x + 90, y + 30),
                      pixel(fb, rowBytes, x + 50, y + 30), pixel(fb, rowBytes, x + 5, y + 5),
                      err ? " TIMEOUT" : "");
@@ -258,12 +258,12 @@ int main(void)
     /* --- B: blending SRC_ALPHA / ONE_MINUS_SRC_ALPHA --- */
     {
         int x = gx + 400, y = gy + 90;
-        nv3d_rect_z(&g, x, y, 60, 60, 0, F1, 0, 0, F1);                    /* červený podklad */
+        nv3d_rect_z(&g, x, y, 60, 60, 0, F1, 0, 0, F1);                    /* red background */
         nv3d_blend(&g, 1);
-        nv3d_rect_z(&g, x + 30, y + 15, 60, 30, 0, F1, F1, F1, 0x3f000000); /* biela, alfa 0.5 */
+        nv3d_rect_z(&g, x + 30, y + 15, 60, 30, 0, F1, F1, F1, 0x3f000000); /* white, alpha 0.5 */
         nv3d_blend(&g, 0);
         err = nva_sync(&a, 60);
-        log_line("blend: %s  cez cervenu %08lx (ff ff 80 80)  cez ciernu %08lx (?? 80 80 80)",
+        log_line("blend: %s  over red %08lx (ff ff 80 80)  over black %08lx (?? 80 80 80)",
                  err ? "TIMEOUT" : "ok", pixel(fb, rowBytes, x + 45, y + 30), pixel(fb, rowBytes, x + 75, y + 30));
         if (err) {
             report_trap(&g, "blend");
@@ -271,7 +271,7 @@ int main(void)
         }
     }
 
-    /* --- C: swizzled textúra 64×64, REPEAT, normalizované súradnice 0..2 --- */
+    /* --- C: swizzled texture 64×64, REPEAT, normalized coordinates 0..2 --- */
     {
         volatile NVU32 *tex = (volatile NVU32 *)(vram + 0x01A00000);
         int tx, ty, x = gx + 10, y = gy + 90;
@@ -289,16 +289,16 @@ int main(void)
         nv3d_rc_modulate_tex(&g);
         nv3d_quad_texf(&g, x, y, 128, 128, 0x40000000, 0x40000000);      /* 0..2 */
         err = nva_sync(&a, 60);
-        log_line("swz textura: %s  (4,4) %08lx cervena  (12,4) %08lx zelena  (68,4) %08lx cervena  (76,68) %08lx zelena",
+        log_line("swz texture: %s  (4,4) %08lx red  (12,4) %08lx green  (68,4) %08lx red  (76,68) %08lx green",
                  err ? "TIMEOUT" : "ok", pixel(fb, rowBytes, x + 4, y + 4), pixel(fb, rowBytes, x + 12, y + 4),
                  pixel(fb, rowBytes, x + 68, y + 4), pixel(fb, rowBytes, x + 76, y + 68));
         if (err) {
-            report_trap(&g, "textura");
+            report_trap(&g, "texture");
             goto finish;
         }
     }
 
-    /* --- D: výkon --- */
+    /* --- D: performance --- */
     {
         NVU32 t0, dt, i;
         int x = gx + 160, y = gy + 90;
@@ -310,7 +310,7 @@ int main(void)
         dt = TickCount() - t0;
         if (!dt)
             dt = 1;
-        log_line("fill: 2000 x 256x192 textur. stvorcov za %lu tickov = %lu Mpix/s%s", dt,
+        log_line("fill: 2000 x 256x192 textured quads in %lu ticks = %lu Mpix/s%s", dt,
                  (2000UL * 256 * 192 / 1000) * 60 / dt / 1000, err ? " (TIMEOUT)" : "");
 
         nv3d_upload_fp(&g, fpMovH0, 4, 1);
@@ -326,15 +326,15 @@ int main(void)
         dt = TickCount() - t0;
         if (!dt)
             dt = 1;
-        log_line("trojuholniky: 200000 malych za %lu tickov = %lu k/s%s", dt, 200000UL * 60 / dt / 1000,
+        log_line("triangles: 200000 small ones in %lu ticks = %lu k/s%s", dt, 200000UL * 60 / dt / 1000,
                  err ? " (TIMEOUT)" : "");
     }
 finish:
     nva_sync(&a, 60);
-    log_line("hotovo; engine ostava v 3D stave (pred QD Accel restart)");
+    log_line("done; the engine stays in 3D state (restart before using QD Accel)");
 
 done:
-    log_line("klik = koniec");
+    log_line("click = quit");
     show(win);
     while (!Button())
         ;

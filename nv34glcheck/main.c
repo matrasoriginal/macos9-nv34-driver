@@ -1,6 +1,6 @@
 /*
- * NV34 GL Check — spustiť v priečinku hry (Quake 2). Zistí, odkiaľ CFM berie „OpenGLLibrary“
- * a prečo sa nenačíta ref_gl.lib. Výsledok na obrazovku aj do „NV34 GL Check.txt“ vedľa programu.
+ * NV34 GL Check — run it in the game folder (Quake 2). Finds out where CFM takes "OpenGLLibrary" from
+ * and why ref_gl.lib does not load. Result on screen and in "NV34 GL Check.txt" next to the program.
  */
 #include <stdio.h>
 #include <string.h>
@@ -42,13 +42,13 @@ static const char *cfm_err(OSErr e)
     case -2801: return "cfragConnectionIDErr";
     case -2802: return "cfragNoSymbolErr";
     case -2803: return "cfragNoSectionErr";
-    case -2804: return "cfragNoLibraryErr (kniznica nenajdena)";
+    case -2804: return "cfragNoLibraryErr (library not found)";
     case -2805: return "cfragDupRegistrationErr";
     case -2806: return "cfragFragmentFormatErr";
-    case -2807: return "cfragUnresolvedErr (chyba symbol)";
+    case -2807: return "cfragUnresolvedErr (missing symbol)";
     case -2808: return "cfragNoPositionErr";
     case -2809: return "cfragNoPrivateMemErr";
-    case -2810: return "cfragNoClientMemErr (malo pamate)";
+    case -2810: return "cfragNoClientMemErr (out of memory)";
     case -2811: return "cfragNoIDsErr";
     case -2812: return "cfragInitOrderErr";
     case -2813: return "cfragImportTooOldErr";
@@ -59,7 +59,7 @@ static const char *cfm_err(OSErr e)
     case -2818: return "cfragCFMStartupErr";
     case -2819: return "cfragCFMInternalErr";
     case -2820: return "cfragFragmentCorruptErr";
-    case -2821: return "cfragInitFunctionErr (init rutina zlyhala)";
+    case -2821: return "cfragInitFunctionErr (init routine failed)";
     case -2822: return "cfragNoApplicationErr";
     case -2823: return "cfragArchitectureErr";
     case -2824: return "cfragFragmentUsageErr";
@@ -75,7 +75,7 @@ static const char *cfm_err(OSErr e)
     case -2834: return "cfragStdFolderErr";
     case -2835: return "cfragRsrcForkErr";
     case -2836: return "cfragCFragRsrcErr";
-    case -43: return "fnfErr (subor nenajdeny)";
+    case -43: return "fnfErr (file not found)";
     }
     return "?";
 }
@@ -106,13 +106,13 @@ int main(void)
             const unsigned char *r = ((GetStringFn)sym)(0x1F01);
             out("   vendor:   %s", v ? (const char *)v : "(null)");
             out("   renderer: %s", r ? (const char *)r : "(null)");
-            out("   -> %s", r && strstr((const char *)r, "MiniGL") ? "NASA kniznica (MiniGL)" : "Apple OpenGL / ina");
+            out("   -> %s", r && strstr((const char *)r, "MiniGL") ? "OUR library (MiniGL)" : "Apple OpenGL / other");
         }
     }
 
     errName[0] = 0;
     e = FSMakeFSSpec(0, 0, "\pref_gl.lib", &spec);
-    out("2) ref_gl.lib v priecinku programu: %d %s", e, cfm_err(e));
+    out("2) ref_gl.lib in the program folder: %d %s", e, cfm_err(e));
     if (e == 0) {
         errName[0] = 0;
         e = GetDiskFragment(&spec, 0, 0, "\pref_gl", kLoadNewCopy, &c2, &mainAddr, errName);
@@ -127,8 +127,8 @@ int main(void)
     }
     if (conn)
         CloseConnection(&conn);
-    out("Hotovo. Vysledok je aj v subore NV34 GL Check.txt.");
-    out("Stlac Return.");
+    out("Done. The result is also in the file NV34 GL Check.txt.");
+    out("Press Return.");
     if (gOut)
         fclose(gOut);
     getchar();

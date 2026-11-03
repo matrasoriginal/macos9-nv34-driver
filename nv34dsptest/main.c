@@ -1,7 +1,7 @@
 /*
- * NV34 DSp Test — volá DrawSprocket ako Half-Life (SDL macosclassic): FindBestContext,
- * GetMonitorFrequency, FadeGammaOut/In, Reserve, SetState… Pred aj po každom kroku zapíše riadok
- * do „NV34 DSp Test.txt“ vedľa programu a vyprázdni disk — pri zamrznutí ukáže posledný krok.
+ * NV34 DSp Test — calls DrawSprocket like Half-Life (SDL macosclassic): FindBestContext,
+ * GetMonitorFrequency, FadeGammaOut/In, Reserve, SetState… Before and after every step it writes a line
+ * to "NV34 DSp Test.txt" next to the program and flushes the disk — after a freeze it shows the last step.
  */
 #include <stdio.h>
 #include <string.h>
@@ -58,7 +58,7 @@ static void *sym(const char *name)
     p[0] = strlen(name);
     memcpy(p + 1, name, p[0]);
     if (FindSymbol(gConn, p, &a, &c) != 0) {
-        out("chyba symbol %s", name);
+        out("missing symbol %s", name);
         return 0;
     }
     return a;
@@ -172,7 +172,7 @@ shut:
     r = Shutdown ? Shutdown() : 0;
     out("  -> %ld", r);
 end:
-    out("Hotovo. Stlac Return.");
+    out("Done. Press Return.");
     if (gOut)
         fclose(gOut);
     getchar();

@@ -1,13 +1,13 @@
 /*
- * NV34 RAVE Test — overenie NV34 RAVE enginu cez verejné RAVE API (QuickDraw 3D RAVE).
+ * NV34 RAVE Test — verifies the NV34 RAVE engine through the public RAVE API (QuickDraw 3D RAVE).
  *
- * 1. vypíše RAVE enginy hlavnej obrazovky (meno, vendor, vlastnosti),
- * 2. na NV34 engine (vendor 'NV34') v okne s double bufferom a z-bufferom:
- *    A z-buffer (tri obdĺžniky, ako gl-7), B blending, C textúra s perspektívou (asymetrická
- *    šachovnica: overí aj poradie bitov swizzle), D bitmapa, E výkon (otáčajúca sa kocka),
- *    každá časť so spätným čítaním pixelov z obrazovky,
- * 3. uloží log enginu (zdieľaný s QD Accel) — aj z hier spustených predtým.
- * Výstup: "NV34 RAVE.txt" + "NV34 RAVE log.txt" vedľa aplikácie.
+ * 1. lists the RAVE engines of the main screen (name, vendor, options),
+ * 2. on the NV34 engine (vendor 'NV34') in a window with a double buffer and z-buffer:
+ *    A z-buffer (three rectangles, like gl-7), B blending, C perspective texture (asymmetric
+ *    checkerboard: also checks the swizzle bit order), D bitmap, E performance (spinning cube),
+ *    each part with pixels read back from the screen,
+ * 3. saves the engine log (shared with QD Accel) — including games run earlier.
+ * Output: "NV34 RAVE.txt" + "NV34 RAVE log.txt" next to the application.
  */
 #include <Quickdraw.h>
 #include <Windows.h>
@@ -107,7 +107,7 @@ static void show(WindowPtr win)
     }
 }
 
-/* pixel obrazovky v globálnych súradniciach */
+/* screen pixel in global coordinates */
 static int gBpp = 32;
 
 static UInt32 screen_pixel(int gx, int gy)
@@ -181,7 +181,7 @@ int main(void)
     InitCursor();
 
     s = get_shared();
-    dump_engine_log(s, "pred testom");
+    dump_engine_log(s, "before the test");
 
     SetRect(&wr, 40, 50, 40 + W, 50 + H + 14 + 12 * LINES);
     win = NewCWindow(0, &wr, "\pNV34 RAVE Test", true, documentProc, (WindowPtr)-1, false, 0);
@@ -190,7 +190,7 @@ int main(void)
     gx = org.h;
     gy = org.v;
 
-    log_line("NV34 RAVE Test 7   shared %s, 3D stav %lu", s ? "ok" : "CHYBA (QD Accel?)", s ? s->state3D : 0);
+    log_line("NV34 RAVE Test 7   shared %s, 3D state %lu", s ? "ok" : "ERROR (QD Accel?)", s ? s->state3D : 0);
 
     gd = GetMainDevice();
     dev.deviceType = kQADeviceGDevice;
@@ -209,11 +209,11 @@ int main(void)
             nv = e;
     }
     if (!nv) {
-        log_line("NV34 RAVE engine nenajdeny (Extensions: NV34 RAVE, NV34 QD Accel, Millions)");
+        log_line("NV34 RAVE engine not found (Extensions: NV34 RAVE, NV34 QD Accel, Millions)");
         goto finish;
     }
 
-    /* kontext = obsah okna (horná časť W x H), klip = viditeľná časť okna */
+    /* context = window contents (top part W x H), clip = visible part of the window */
     rr.left = gx; rr.top = gy; rr.right = gx + W; rr.bottom = gy + H;
     rgn = NewRgn();
     CopyRgn(win->visRgn, rgn);
@@ -221,28 +221,28 @@ int main(void)
     clip.clipType = kQAClipRgn;
     clip.clip.clipRgn = rgn;
 
-    /* textúra 64x32 (asymetrická: x po 8, y po 4) a bitmapa 16x16 s priehľadným rohom */
+    /* texture 64x32 (asymmetric: x by 8, y by 4) and a 16x16 bitmap with a transparent corner */
     for (i = 0; i < 64 * 32; i++) {
         int x = i % 64, y = i / 64;
         texPix[i] = ((x >> 3) + (y >> 2)) & 1 ? 0xFFFF0000 : (x < 8 && y < 4 ? 0xFF0000FF : 0xFF00FF00);
     }
     img.width = 64; img.height = 32; img.rowBytes = 256; img.pixmap = texPix;
-    /* FlipOrigin = riadok 0 hore (bez neho má RAVE textúra počiatok vľavo dole) */
+    /* FlipOrigin = row 0 at the top (without it a RAVE texture has its origin bottom left) */
     err = QATextureNew(nv, kQATexture_FlipOrigin, kQAPixel_ARGB32, &img, &tex);
     log_line("QATextureNew: %ld", err);
     for (i = 0; i < 256; i++)
         bmpPix[i] = (i % 16) + (i / 16) < 8 ? 0x00000000 : 0xFFFFFF00;
     img.width = 16; img.height = 16; img.rowBytes = 64; img.pixmap = bmpPix;
     QABitmapNew(nv, 0, kQAPixel_ARGB32, &img, &bmp);
-    /* 16-bit textúra 8x8: párne stĺpce červené, nepárne zelené, riadok 0 modrý */
+    /* 16-bit 8x8 texture: even columns red, odd green, row 0 blue */
     for (i = 0; i < 64; i++)
         tex16Pix[i] = i < 8 ? 0x801f : (i & 1) ? 0x83e0 : 0xfc00;
     img.width = 8; img.height = 8; img.rowBytes = 16; img.pixmap = tex16Pix;
     QATextureNew(nv, kQATexture_FlipOrigin, kQAPixel_ARGB16, &img, &tex16);
 
-    /* variant 0: zadný buffer s pitchom obrazovky; 1: kompaktný pitch (EngineSpecific1) */
+    /* variant 0: back buffer with the screen pitch; 1: compact pitch (EngineSpecific1) */
     gBpp = (*(*gd)->gdPMap)->pixelSize;
-    log_line("obrazovka %d bpp", gBpp);
+    log_line("screen %d bpp", gBpp);
     for (variant = 0; variant < 1; variant++) {
         TQAPixelBuffer pb;
         static const int px[12][2] = { {15, 15}, {60, 40}, {100, 40}, {5, 5}, {170, 50}, {241, 11}, {261, 11},
@@ -269,7 +269,7 @@ int main(void)
         rect_g(dc, 160, 40, 60, 60, 0.1f, 1, 1, 1, 0.5f);
         dc->setInt(dc, kQATag_Blend, kQABlend_PreMultiply);
         dc->setInt(dc, kQATag_ZFunction, kQAZFunction_LT);
-        /* C textúra bez perspektívy (texel 2x2 px) + perspektíva */
+        /* C texture without perspective (texel 2x2 px) + perspective */
         if (tex) {
             TQAVTexture v[4];
             dc->setPtr(dc, kQATag_Texture, tex);
@@ -288,7 +288,7 @@ int main(void)
             dc->drawTriTexture(dc, &v[0], &v[1], &v[2], 0);
             dc->drawTriTexture(dc, &v[0], &v[2], &v[3], 0);
         }
-        /* F 16-bit textúra 64x64 (texel = 8x8 px) */
+        /* F 16-bit 64x64 texture (texel = 8x8 px) */
         if (tex16) {
             TQAVTexture v[4];
             dc->setPtr(dc, kQATag_Texture, tex16);
@@ -300,10 +300,10 @@ int main(void)
             dc->drawTriTexture(dc, &v[0], &v[1], &v[2], 0);
             dc->drawTriTexture(dc, &v[0], &v[2], &v[3], 0);
         }
-        /* G presnosť hĺbky (ako UT: z blízko 1): bližší zelený, potom vzdialenejší červený */
+        /* G depth precision (like UT: z close to 1): nearer green, then farther red */
         rect_g(dc, 300, 230, 60, 40, 0.999990f, 0, 1, 0, 1);
         rect_g(dc, 300, 230, 60, 40, 0.999995f, 1, 0, 0, 1);
-        /* D bitmapa */
+        /* D bitmap */
         if (bmp) {
             TQAVGouraud bv;
             vg(&bv, 10, 100, 0.0f, 1, 1, 1, 1);
@@ -311,7 +311,7 @@ int main(void)
             dc->drawBitmap(dc, &bv, bmp);
             dc->setInt(dc, kQATag_Blend, kQABlend_PreMultiply);
         }
-        /* zadný buffer cez CPU (pred prenosom na obrazovku) */
+        /* back buffer via the CPU (before the transfer to the screen) */
         err = dc->accessDrawBuffer(dc, &pb);
         if (!err) {
             for (i = 0; i < 12; i++)
@@ -319,7 +319,7 @@ int main(void)
                     *(volatile UInt16 *)((char *)pb.baseAddr + px[i][1] * pb.rowBytes + px[i][0] * 2) :
                     *(volatile UInt32 *)((char *)pb.baseAddr + px[i][1] * pb.rowBytes + px[i][0] * 4);
             dc->accessDrawBufferEnd(dc, 0);
-            log_line(" zadny buf (rb %ld): A %08lx %08lx %08lx bg %08lx B %08lx C %08lx %08lx D %08lx F %08lx %08lx %08lx G %08lx",
+            log_line(" back buf (rb %ld): A %08lx %08lx %08lx bg %08lx B %08lx C %08lx %08lx D %08lx F %08lx %08lx %08lx G %08lx",
                      pb.rowBytes, back[0], back[1], back[2], back[3], back[4], back[5], back[6], back[7],
                      back[8], back[9], back[10], back[11]);
         } else {
@@ -329,11 +329,11 @@ int main(void)
         dc->sync(dc);
         for (i = 0; i < 12; i++)
             back[i] = screen_pixel(gx + px[i][0], gy + px[i][1]);
-        log_line(" obrazovka:        A %08lx %08lx %08lx bg %08lx B %08lx C %08lx %08lx D %08lx F %08lx %08lx %08lx G %08lx",
+        log_line(" screen:           A %08lx %08lx %08lx bg %08lx B %08lx C %08lx %08lx D %08lx F %08lx %08lx %08lx G %08lx",
                  back[0], back[1], back[2], back[3], back[4], back[5], back[6], back[7],
                  back[8], back[9], back[10], back[11]);
 
-        /* E výkon 2 s */
+        /* E performance 2 s */
         {
             UInt32 t0 = TickCount(), frames = 0;
             float ang = 0;
@@ -356,15 +356,15 @@ int main(void)
                 frames++;
             }
             dc->sync(dc);
-            log_line(" E vykon: %lu snimok/2 s = %lu fps, %lu k trojuh./s", frames, frames / 2, frames * 2000 / 2000);
+            log_line(" E perf: %lu frames/2 s = %lu fps, %lu k tris/s", frames, frames / 2, frames * 2000 / 2000);
         }
         QADrawContextDelete(dc);
         dc = 0;
     }
     if (gBpp == 16)
-        log_line("ocak.: A 03e0 7c00 001f bg 0c69 B 7e10 C 001f 7c00 D 7fe0 F 001f 7c00 03e0 G 03e0 (bit 15 lubovolny)");
+        log_line("expect: A 03e0 7c00 001f bg 0c69 B 7e10 C 001f 7c00 D 7fe0 F 001f 7c00 03e0 G 03e0 (bit 15 arbitrary)");
     else
-        log_line("ocak.: A ff00ff00 ffff0000 ff0000ff bg ff1a1a4d B bfff8080 C ff0000ff ffff0000 D ffffff00 F ff0000ff ffff0000 ff00ff00 G ff00ff00");
+        log_line("expect: A ff00ff00 ffff0000 ff0000ff bg ff1a1a4d B bfff8080 C ff0000ff ffff0000 D ffffff00 F ff0000ff ffff0000 ff00ff00 G ff00ff00");
 
 finish:
     if (tex)
@@ -375,8 +375,8 @@ finish:
         QATextureDelete(nv, tex16);
     if (dc)
         QADrawContextDelete(dc);
-    dump_engine_log(s, "po teste");
-    log_line("hotovo; klik = koniec");
+    dump_engine_log(s, "after the test");
+    log_line("done; click = quit");
     show(win);
     for (;;) {
         if (WaitNextEvent(everyEvent, &ev, 10, 0)) {

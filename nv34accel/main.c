@@ -1,13 +1,13 @@
 /*
- * NV34 Accel — test 2D enginu GeForce FX Go5200 v OS 9 (krok A fázy 3).
+ * NV34 Accel — test of the GeForce FX Go5200 2D engine on OS 9 (step A of phase 3).
  *
- * 1. nájde MMIO/VRAM v Name Registry, framebuffer z hlavného GDevice,
- * 2. inicializuje PFIFO/PGRAPH (accel/nv34_accel.c, port xf86-video-nv),
- * 3. GPU výplň a GPU blit v okne, overenie spätným čítaním pixelov,
- * 4. meranie GPU vs. CPU (QuickDraw) pre výplň a kopírovanie obrazovka → obrazovka.
+ * 1. finds MMIO/VRAM in the Name Registry, the framebuffer from the main GDevice,
+ * 2. initializes PFIFO/PGRAPH (accel/nv34_accel.c, port of xf86-video-nv),
+ * 3. GPU fill and GPU blit in a window, verified by reading the pixels back,
+ * 4. measures GPU vs. CPU (QuickDraw) for fill and screen → screen copy.
  *
- * Log "NV34 Accel.txt" sa zapisuje po riadkoch (otvoriť/zavrieť), aby po prípadnom
- * zaseknutí GPU ostal posledný vykonaný krok.
+ * The log "NV34 Accel.txt" is written line by line (open/close) so that the last executed step
+ * survives a GPU hang.
  */
 #include <Quickdraw.h>
 #include <Windows.h>
@@ -173,7 +173,7 @@ int main(void)
     fb = (volatile NVU8 *)(**spm).baseAddr;
 
     if (!find_hw(&mmio, &vram, &vramSize)) {
-        log_line("CHYBA: NVDA,Parent / BAR nenajdene");
+        log_line("ERROR: NVDA,Parent / BAR not found");
         goto done;
     }
     fbOffset = (NVU32)(fb - vram);
@@ -198,11 +198,11 @@ int main(void)
     }
     log_line("PFB cfg0 %08lx cfg1 %08lx", nva_rd32(&a, 0x100200), nva_rd32(&a, 0x100204));
     if (((boot0 >> 20) & 0x1ff) != 0x34) {
-        log_line("CHYBA: cip nie je NV34");
+        log_line("ERROR: chip is not an NV34");
         goto done;
     }
     if (fbOffset >= vramSize || (fbOffset & 63)) {
-        log_line("CHYBA: FB mimo VRAM alebo nezarovnany");
+        log_line("ERROR: FB outside VRAM or misaligned");
         goto done;
     }
 
@@ -214,7 +214,7 @@ int main(void)
     gy = gl.v;
 
     /* --- init --- */
-    log_line("init engine (BE objekty %d)...", a.beObjects);
+    log_line("init engine (BE objects %d)...", a.beObjects);
     nva_init_engine(&a);
     err = nva_reset_graphics(&a, bpp == 16 ? 15 : bpp, rowBytes, fbOffset);
     if (!err)
@@ -227,18 +227,18 @@ int main(void)
         goto done;
     }
 
-    /* --- výplň: farba v natívnom formáte obrazovky --- */
+    /* --- fill: color in the native screen format --- */
     for (i = 0; i < 2; i++) {
         expect = bpp == 32 ? 0x00C01020 : bpp == 16 ? 0x6044 : 0xE3;
         nva_fill(&a, gx + 300, gy + 60, 80, 60, expect);
         err = nva_sync(&a, 60);
         got = rd_pixel(fb, rowBytes, bpp, gx + 340, gy + 90);
-        log_line("fill: %s  ocakavane %08lx precitane %08lx", err ? "TIMEOUT" : "OK", expect, got);
+        log_line("fill: %s  expected %08lx read %08lx", err ? "TIMEOUT" : "OK", expect, got);
         if (err || got == expect || i == 1)
             break;
-        /* nesedí → skúsiť objekty bez big-endian príznaku */
+        /* mismatch → try the objects without the big-endian flag */
         a.beObjects = !a.beObjects;
-        log_line("reinit s BE objektami %d", a.beObjects);
+        log_line("reinit with BE objects %d", a.beObjects);
         nva_init_engine(&a);
         if (nva_reset_graphics(&a, bpp == 16 ? 15 : bpp, rowBytes, fbOffset) || nva_sync(&a, 60)) {
             err = 1;
@@ -252,20 +252,20 @@ int main(void)
         goto done;
     }
 
-    /* --- blit: horný pás farebných štvorcov o 200 px nižšie --- */
+    /* --- blit: top band of colored squares 200 px lower --- */
     nva_copy(&a, gx, gy, gx, gy + 200, 480, 40);
     err = nva_sync(&a, 60);
     ok = 1;
     for (i = 0; i < 480; i += 7)
         if (rd_pixel(fb, rowBytes, bpp, gx + i, gy + 20) != rd_pixel(fb, rowBytes, bpp, gx + i, gy + 220))
             ok = 0;
-    log_line("blit: %s, obsah %s", err ? "TIMEOUT" : "OK", ok ? "zhodny" : "NEZHODNY");
+    log_line("blit: %s, contents %s", err ? "TIMEOUT" : "OK", ok ? "match" : "MISMATCH");
     if (err) {
         nva_shutdown(&a);
         goto done;
     }
 
-    /* --- meranie: 1 s každý test, W-8 x H px --- */
+    /* --- measurement: 1 s per test, W-8 x H px --- */
     {
         NVU32 t0, n, rate, bytes = (W - 8) * H * (bpp / 8);
         Rect r1 = r, r2 = r;
@@ -307,10 +307,10 @@ int main(void)
         rate = n * 60 / (TickCount() - t0);
         log_line("CPU scr->scr %5lu /s  %7lu KB/s (QuickDraw)", rate, rate * (bytes >> 10));
     }
-    log_line("engine necham v necinnosti; hotovo");
+    log_line("leaving the engine idle; done");
 
 done:
-    log_line("klik = koniec");
+    log_line("click = quit");
     show(win);
     while (!Button())
         ;

@@ -1,20 +1,20 @@
 /*
- * NV34 QD Accel — hardvérová akcelerácia CopyBits obrazovka → obrazovka (krok 2B fázy 3).
+ * NV34 QD Accel — hardware acceleration of screen → screen CopyBits (step 2B of phase 3).
  *
- * PPC fragment bez runtime aplikácie. 68k INIT (init68k.c) ho pri štarte načíta do
- * systémovej haldy a zavolá nv34qd_install(): inicializuje 2D engine (accel/nv34_accel.c)
- * a nainštaluje patch trapu CopyBits. Patch nainštalovaný počas INIT fázy je globálny
- * (patch z aplikácie Process Manager obmedzí na jej kontext — overené v qd-2: calls 1).
+ * PPC fragment without an application runtime. The 68k INIT (init68k.c) loads it at boot into
+ * the system heap and calls nv34qd_install(): it initializes the 2D engine (accel/nv34_accel.c)
+ * and installs the CopyBits trap patch. A patch installed during the INIT phase is global
+ * (the Process Manager limits a patch from an application to its own context — verified in qd-2: calls 1).
  *
- * Patch akceleruje iba bezpečný prípad, všetko ostatné ide na pôvodný CopyBits:
- *   - zdroj aj cieľ = framebuffer hlavnej obrazovky (rovnaký baseAddr/rowBytes/hĺbka),
- *   - srcCopy, rovnaká veľkosť zdroja a cieľa, čierne popredie a biele pozadie portu,
- *   - cieľ = bitmapa aktuálneho portu (klip = visRgn ∩ clipRgn ∩ maskRgn), alebo iná
- *     bitmapa obrazovky bez portu (klip = maskRgn),
- *   - klip sa rozloží na obdĺžniky, poradie podľa smeru posunu (prekryv zdroja a cieľa).
+ * The patch only accelerates the safe case, everything else goes to the original CopyBits:
+ *   - source and destination = framebuffer of the main screen (same baseAddr/rowBytes/depth),
+ *   - srcCopy, same source and destination size, black foreground and white background of the port,
+ *   - destination = bitmap of the current port (clip = visRgn ∩ clipRgn ∩ maskRgn), or another
+ *     screen bitmap without a port (clip = maskRgn),
+ *   - the clip is split into rectangles, ordered by scroll direction (source/destination overlap).
  *
- * Vypínače (Open Firmware boot-args): nv34off, nv34noaccel. Štatistiky: property
- * "NV34ACCEL,stats" na NVDA,Display-A (adresa štruktúry, číta NV34 Info).
+ * Switches (Open Firmware boot-args): nv34off, nv34noaccel. Statistics: property
+ * "NV34ACCEL,stats" on NVDA,Display-A (address of the struct, read by NV34 Info).
  */
 #include <Quickdraw.h>
 #include <MacMemory.h>
@@ -45,7 +45,7 @@ extern long CallUniversalProc(UniversalProcPtr proc, ProcInfoType info, ...);
 /* pascal void CopyDeepMask(BitMap*, BitMap*, BitMap*, Rect*, Rect*, Rect*, short, RgnHandle) */
 #define uppCopyDeepMaskProcInfo 0x003BFFC0
 
-/* časovanie (DriverServicesLib) */
+/* timing (DriverServicesLib) */
 typedef struct { UInt32 hi, lo; } AbsTime;
 extern AbsTime UpTime(void);
 extern SInt32 AbsoluteDeltaToDuration(AbsTime leftAbsoluteTime, AbsTime rightAbsoluteTime);
@@ -63,7 +63,7 @@ static UInt32 elapsed_us(AbsTime t0)
 #define MAX_XS      256
 
 
-/* bez libc */
+/* no libc */
 void *memset(void *d, int c, unsigned long n)
 {
     unsigned char *p = d;
@@ -84,44 +84,44 @@ static int contains(const char *s, const char *w)
     return 0;
 }
 
-/* ---- štatistiky (číta NV34 Info) -------------------------------------------- */
+/* ---- statistics (read by NV34 Info) -------------------------------------------- */
 
 typedef struct Stats {
     UInt32 magic;           /* 'NVQS' */
     UInt32 version;
-    UInt32 calls;           /* všetky CopyBits */
-    UInt32 accelerated;     /* vybavené GPU */
-    UInt32 rects;           /* GPU obdĺžniky */
-    UInt32 pixels;          /* GPU pixely (÷ 1024) */
-    UInt32 notScreen;       /* zdroj alebo cieľ nie je obrazovka */
-    UInt32 notSrcCopy;      /* iný transfer mód */
-    UInt32 scaled;          /* rôzna veľkosť */
-    UInt32 colorized;       /* popredie/pozadie nie čierna/biela, iná CLUT */
-    UInt32 complexRgn;      /* príliš veľa obdĺžnikov */
-    UInt32 busy;            /* rekurzia */
+    UInt32 calls;           /* all CopyBits */
+    UInt32 accelerated;     /* handled by the GPU */
+    UInt32 rects;           /* GPU rectangles */
+    UInt32 pixels;          /* GPU pixels (÷ 1024) */
+    UInt32 notScreen;       /* source or destination is not the screen */
+    UInt32 notSrcCopy;      /* other transfer mode */
+    UInt32 scaled;          /* different size */
+    UInt32 colorized;       /* foreground/background not black/white, other CLUT */
+    UInt32 complexRgn;      /* too many rectangles */
+    UInt32 busy;            /* recursion */
     UInt32 timeouts;
     UInt32 reinits;
     UInt32 surfaceResets;
-    UInt32 disabled;        /* 1 = akcelerácia vypnutá po chybe */
-    /* v2: diagnostika inštalácie */
-    UInt32 stage;           /* 1 hw, 2 engine, 3 UPP, 4 nainštalované, 5 samotest hotový, 9 koniec */
-    UInt32 myUPP;           /* náš routine descriptor */
-    UInt32 oldTrap;         /* pôvodná adresa trapu */
-    UInt32 trapAfterSet;    /* NGetTrapAddress hneď po NSetTrapAddress */
-    UInt32 trapNow;         /* NGetTrapAddress v event loope */
-    UInt32 heartbeat;       /* počet prechodov event loopu */
-    UInt32 selfTestCalls;   /* koľko volaní patchu vyvolal vlastný CopyBits (0 = PPC volania ho obchádzajú) */
-    /* v4: profil času (µs) — kde Finder trávi čas */
-    UInt32 accelUs;         /* GPU cesta vrátane klipu a sync */
-    UInt32 dstScrCalls, dstScrUs;   /* CPU CopyBits: cieľ obrazovka, zdroj nie (offscreen → obrazovka) */
-    UInt32 srcScrCalls, srcScrUs;   /* CPU CopyBits: zdroj obrazovka (čítanie VRAM) */
-    UInt32 otherCalls, otherUs;     /* CPU CopyBits: ostatné (offscreen ↔ offscreen, iný mód na obrazovku…) */
+    UInt32 disabled;        /* 1 = acceleration disabled after an error */
+    /* v2: installation diagnostics */
+    UInt32 stage;           /* 1 hw, 2 engine, 3 UPP, 4 installed, 5 self-test done, 9 end */
+    UInt32 myUPP;           /* our routine descriptor */
+    UInt32 oldTrap;         /* original trap address */
+    UInt32 trapAfterSet;    /* NGetTrapAddress right after NSetTrapAddress */
+    UInt32 trapNow;         /* NGetTrapAddress in the event loop */
+    UInt32 heartbeat;       /* number of event loop passes */
+    UInt32 selfTestCalls;   /* how many patch calls our own CopyBits triggered (0 = PPC calls bypass it) */
+    /* v4: time profile (µs) — where the Finder spends its time */
+    UInt32 accelUs;         /* GPU path including clip and sync */
+    UInt32 dstScrCalls, dstScrUs;   /* CPU CopyBits: destination screen, source not (offscreen → screen) */
+    UInt32 srcScrCalls, srcScrUs;   /* CPU CopyBits: source screen (VRAM reads) */
+    UInt32 otherCalls, otherUs;     /* CPU CopyBits: others (offscreen ↔ offscreen, other mode to screen…) */
     UInt32 maskCalls, maskUs;       /* CopyMask (pass-through) */
     UInt32 deepCalls, deepUs;       /* CopyDeepMask (pass-through) */
-    UInt32 maskDstScr, deepDstScr;  /* z toho s cieľom na obrazovke */
-    /* v5: rozpad kategórie "ostatné": index = srcVRAM*4 + dstVRAM*2 + (mode == srcCopy) */
+    UInt32 maskDstScr, deepDstScr;  /* of those, with the screen as destination */
+    /* v5: breakdown of the "others" category: index = srcVRAM*4 + dstVRAM*2 + (mode == srcCopy) */
     UInt32 otherBucketCalls[8], otherBucketUs[8];
-    /* najdrahšie volanie v kategórii "ostatné" */
+    /* most expensive call in the "others" category */
     UInt32 worstUs, worstMode, worstSrcBase, worstDstBase, worstSrcRB, worstDstRB;
     UInt32 worstDepths;     /* src << 16 | dst */
     UInt32 worstSize;       /* w << 16 | h */
@@ -130,7 +130,7 @@ typedef struct Stats {
 
 static Stats gStats;
 
-/* ---- stav ---------------------------------------------------------------- */
+/* ---- state ---------------------------------------------------------------- */
 
 static NVAccel gA;
 static UniversalProcPtr gOldCopyBits;
@@ -145,7 +145,7 @@ static NVU32 ticks(void)
     return TickCount();
 }
 
-/* ---- zdieľanie s RAVE enginom (accel/nv34_shared.h) ------------------------ */
+/* ---- sharing with the RAVE engine (accel/nv34_shared.h) ------------------------ */
 
 static NV3D gG;
 static NV34Shared gShared;
@@ -159,7 +159,7 @@ static long qd_ensure3D(void)
     if (gShared.state3D == 2 || !gEngineOK || gStats.disabled || gBusy)
         return -1;
     if (gShared.state3D == 1) {
-        /* 2D povrch podľa aktuálnej obrazovky (RAVE blit po zmene hĺbky) */
+        /* 2D surface according to the current screen (RAVE blit after a depth change) */
         int ok;
         gBusy = 1;
         ok = ensure_surface(*(*GetMainDevice())->gdPMap);
@@ -184,7 +184,7 @@ static long qd_ensure3D(void)
 
 fail:
     gShared.state3D = 2;
-    gStats.disabled = 1;        /* GPU v neznámom stave → 2D radšej softvérovo */
+    gStats.disabled = 1;        /* GPU in an unknown state → do 2D in software instead */
     gBusy = 0;
     return -1;
 }
@@ -195,16 +195,16 @@ static void qd_restore2D(void)
         nva_restore_2d(&gA);
 }
 
-/* Push buffer (opt-2): 512 KB od 4 MB — viac ako celá snímka Quake II (~430 KB), CPU a GPU
- * bežia súbežne; predtým 32 KB na konci VRAM a CPU čakal ~13× za snímku. */
+/* Push buffer (opt-2): 512 KB from 4 MB — more than a whole Quake II frame (~430 KB), CPU and GPU
+ * run concurrently; previously 32 KB at the end of VRAM and the CPU waited ~13× per frame. */
 #define PUSH_START  0x00400000
 #define PUSH_SIZE   0x00080000
 
-/* Alokátor VRAM pre 3D: od 4,5 MB (pod tým framebuffer, fragment programy NV3D, push buffer)
- * po 31 MB (nad tým inštančná pamäť GPU); bloky zoradené podľa offsetu, voľné sa zlučujú. */
+/* VRAM allocator for 3D: from 4.5 MB (below it the framebuffer, NV3D fragment programs, push buffer)
+ * up to 31 MB (above it GPU instance memory); blocks sorted by offset, free ones are merged. */
 #define ARENA_START 0x00480000
 #define ARENA_END   0x01F00000
-#define MAX_BLOCKS  4096                /* rave-5: UT má stovky malých textúr */
+#define MAX_BLOCKS  4096                /* rave-5: UT has hundreds of small textures */
 
 typedef struct { NVU32 off, size, used; } Block;
 static Block gBlocks[MAX_BLOCKS];
@@ -232,7 +232,7 @@ static NVU32 vram_alloc(NVU32 size, NVU32 align)
             continue;
         if (gBlockCount + 2 > MAX_BLOCKS)
             return 0;
-        if (pad) {                      /* voľný kúsok pred zarovnaním */
+        if (pad) {                      /* free piece before the alignment */
             for (j = gBlockCount; j > i; j--)
                 gBlocks[j] = gBlocks[j - 1];
             gBlockCount++;
@@ -242,7 +242,7 @@ static NVU32 vram_alloc(NVU32 size, NVU32 align)
             b->off = start;
             b->size -= pad;
         }
-        if (b->size > size) {           /* zvyšok za blokom */
+        if (b->size > size) {           /* remainder after the block */
             for (j = gBlockCount; j > i + 1; j--)
                 gBlocks[j] = gBlocks[j - 1];
             gBlockCount++;
@@ -317,7 +317,7 @@ static void publish_shared(void)
     RegistryEntryIDDispose(&e);
 }
 
-/* ---- hardvér ------------------------------------------------------------- */
+/* ---- hardware ------------------------------------------------------------- */
 
 static int find_hw(void)
 {
@@ -353,9 +353,9 @@ static int find_hw(void)
     if (!gA.mmio || !gA.vram)
         return 0;
     gA.bigEndianRegs = (*(volatile UInt32 *)(gA.mmio + 4) == 0x01000001);
-    /* Objekty v LE režime: blit je potom presná kópia bajtov v každej hĺbke. BE príznak
-     * (xf86 na PPC) prehadzuje 32-bit slová — pri 32 bpp neškodné, pri 16/8 bpp prehodí
-     * susedné pixely pri posune o nepárny počet (qd-6: Thousands rozbité). Výplne nepoužívame. */
+    /* Objects in LE mode: a blit is then an exact byte copy at any depth. The BE flag
+     * (xf86 on PPC) swaps 32-bit words — harmless at 32 bpp, at 16/8 bpp it swaps
+     * neighboring pixels when shifting by an odd amount (qd-6: Thousands broken). We do not use fills. */
     gA.beObjects = 0;
     gA.rawFormats = 1;
     gA.ticks = ticks;
@@ -395,7 +395,7 @@ static void publish_stats(void)
     RegistryEntryIDDispose(&e);
 }
 
-/* Povrch enginu musí zodpovedať aktuálnej obrazovke (driver mení hĺbku/rozlíšenie). */
+/* The engine surface must match the current screen (the driver changes depth/resolution). */
 static int ensure_surface(PixMapPtr screen)
 {
     UInt32 rb = screen->rowBytes & 0x3fff;
@@ -409,8 +409,8 @@ static int ensure_surface(PixMapPtr screen)
         return 0;
     if (nva_sync(&gA, 30) != kNVAOK)
         return 0;
-    /* prvýkrát po inite celý reset (push buffer od nuly), potom iba nové príkazy povrchu —
-     * reset za behu by GPU nechal čítať staré príkazy od starého GET (qd-7: Thousands). */
+    /* first time after init a full reset (push buffer from zero), afterwards only new surface commands —
+     * a reset at run time would leave the GPU reading old commands from the old GET (qd-7: Thousands). */
     if (!gSurfBase) {
         if (nva_reset_graphics(&gA, depth, rb, off) != kNVAOK)
             return 0;
@@ -433,7 +433,7 @@ static int engine_start(void)
     return 1;
 }
 
-/* ---- regióny ------------------------------------------------------------- */
+/* ---- regions ------------------------------------------------------------- */
 
 typedef struct { short top, left, bottom, right; } R;
 
@@ -458,7 +458,7 @@ static int toggle_x(short *xs, int n, short x)
     return n + 1;
 }
 
-/* Klasický QuickDraw región → obdĺžniky (pásy zhora nadol, v páse zľava doprava). */
+/* Classic QuickDraw region → rectangles (bands top to bottom, left to right within a band). */
 static int region_rects(RgnHandle rgn)
 {
     Region *r = *rgn;
@@ -507,7 +507,7 @@ static int region_rects(RgnHandle rgn)
 
 /* ---- patch --------------------------------------------------------------- */
 
-/* BitMap* z CopyBits → PixMap (CGrafPort portBits = handle, PixMap = bit 15). */
+/* BitMap* from CopyBits → PixMap (CGrafPort portBits = handle, PixMap = bit 15). */
 static PixMapPtr as_pixmap(const BitMap *b)
 {
     short rb = b->rowBytes;
@@ -524,12 +524,12 @@ static int is_screen(PixMapPtr pm, PixMapPtr screen)
            (pm->rowBytes & 0x3fff) == (screen->rowBytes & 0x3fff) && pm->pixelSize == screen->pixelSize;
 }
 
-/* Zdroj/cieľ ako oblasť obrazovky. Okrem PixMapu obrazovky berieme aj klasickú 1-bit BitMap
- * s baseAddr framebuffera (screenBits, port Window Managera) — QuickDraw ju nahradí PixMapom
- * zariadenia; súradnice určuje jej bounds. Presun okien ide práve takto (qd-5: 76 volaní, 31 s). */
+/* Source/destination as a screen area. Besides the screen PixMap we also accept a classic 1-bit BitMap
+ * with the framebuffer's baseAddr (screenBits, the Window Manager port) — QuickDraw substitutes the device
+ * PixMap for it; its bounds give the coordinates. This is exactly how window dragging works (qd-5: 76 calls, 31 s). */
 typedef struct {
     Rect        bounds;
-    CTabHandle  ct;         /* 0 pri 1-bit aliase */
+    CTabHandle  ct;         /* 0 for the 1-bit alias */
 } Surf;
 
 static int resolve_screen(const BitMap *b, PixMapPtr screen, Surf *s)
@@ -588,7 +588,7 @@ static int accel_copy(BitMap *src, BitMap *dst, Rect *sr, Rect *dr, short mode, 
         gStats.scaled++;
         return 0;
     }
-    /* zdroj musí celý ležať v zdrojovej bitmape */
+    /* the source must lie entirely within the source bitmap */
     if (sr->left < ss.bounds.left || sr->top < ss.bounds.top ||
         sr->right > ss.bounds.right || sr->bottom > ss.bounds.bottom) {
         gStats.notScreen++;
@@ -602,7 +602,7 @@ static int accel_copy(BitMap *src, BitMap *dst, Rect *sr, Rect *dr, short mode, 
     if (!ensure_surface(screen))
         return 0;
 
-    /* klip v lokálnych súradniciach cieľa */
+    /* clip in the destination's local coordinates */
     clip = NewRgn();
     tmp = NewRgn();
     if (!clip || !tmp)
@@ -624,19 +624,19 @@ static int accel_copy(BitMap *src, BitMap *dst, Rect *sr, Rect *dr, short mode, 
     if (gRectCount == 0)
         goto out;
 
-    /* lokálne → pixely obrazovky */
+    /* local → screen pixels */
     dxo = -ds.bounds.left;
     dyo = -ds.bounds.top;
     sxo = sr->left - dr->left - ss.bounds.left;
     syo = sr->top - dr->top - ss.bounds.top;
-    dxl = (dr->left + dxo) - (sr->left - ss.bounds.left);   /* posun v pixeloch */
+    dxl = (dr->left + dxo) - (sr->left - ss.bounds.left);   /* shift in pixels */
     dyl = (dr->top + dyo) - (sr->top - ss.bounds.top);
 
     gbox = (**clip).rgnBBox;
     OffsetRect(&gbox, dxo, dyo);
     ShieldCursor(&gbox, zero);
 
-    /* poradie: pri posune nadol od spodného pásu, pri posune doprava sprava */
+    /* order: when moving down start from the bottom band, when moving right from the right */
     for (i = 0; i < gRectCount; i++) {
         int k = (dyl > 0 || (dyl == 0 && dxl > 0)) ? gRectCount - 1 - i : i;
         R *q = &gRects[k];
@@ -673,7 +673,7 @@ static int on_screen(const BitMap *b)
     return resolve_screen(b, screen, &s);
 }
 
-/* baseAddr / rowBytes / hĺbka pre BitMap aj PixMap */
+/* baseAddr / rowBytes / depth for both BitMap and PixMap */
 static void bits_info(const BitMap *b, UInt32 *base, UInt32 *rb, UInt32 *depth)
 {
     PixMapPtr pm = as_pixmap(b);
@@ -749,7 +749,7 @@ static void MyCopyBits(BitMap *src, BitMap *dst, Rect *sr, Rect *dr, short mode,
     gBusy = 0;
 }
 
-/* ---- pass-through meranie CopyMask / CopyDeepMask (ikony) ---------------- */
+/* ---- pass-through timing of CopyMask / CopyDeepMask (icons) ---------------- */
 
 static UniversalProcPtr gOldCopyMask, gOldCopyDeepMask;
 
@@ -774,9 +774,9 @@ static void MyCopyDeepMask(BitMap *src, BitMap *mask, BitMap *dst, Rect *sr, Rec
     gStats.deepUs += elapsed_us(t0);
 }
 
-/* ---- inštalácia (volá 68k INIT) ---------------------------------------- */
+/* ---- installation (called by the 68k INIT) ---------------------------------------- */
 
-/* Návratová hodnota: 0 = patch nainštalovaný, inak stage, kde sa skončilo. */
+/* Return value: 0 = patch installed, otherwise the stage where it stopped. */
 long nv34qd_install(void)
 {
     THz oldZone = GetZone();
@@ -797,7 +797,7 @@ long nv34qd_install(void)
     if (!boot_arg("nv34no3d"))
         publish_shared();
 
-    SetZone(SystemZone());      /* routine descriptor musí prežiť všetky aplikácie */
+    SetZone(SystemZone());      /* the routine descriptor must outlive all applications */
     gMyCopyBitsUPP = NewRoutineDescriptor((ProcPtr)MyCopyBits, uppCopyBitsProcInfo, kPowerPCISA);
     SetZone(oldZone);
     if (!gMyCopyBitsUPP)
@@ -811,7 +811,7 @@ long nv34qd_install(void)
     gStats.trapAfterSet = (UInt32)NGetTrapAddress(TRAP_COPYBITS, kToolboxTrapType);
     gStats.stage = 4;
 
-    /* meranie ikon: CopyMask / CopyDeepMask iba počítajú čas a volajú pôvodné */
+    /* icon timing: CopyMask / CopyDeepMask only measure time and call the originals */
     SetZone(SystemZone());
     {
         UniversalProcPtr m = NewRoutineDescriptor((ProcPtr)MyCopyMask, uppCopyMaskProcInfo, kPowerPCISA);

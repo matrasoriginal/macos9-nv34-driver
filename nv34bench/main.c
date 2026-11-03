@@ -1,9 +1,9 @@
 /*
- * NV34 Bench — meria rýchlosť softvérového QuickDraw na hlavnej obrazovke (OS 9).
+ * NV34 Bench — measures the speed of software QuickDraw on the main screen (OS 9).
  *
- * Každý test beží ~2 s a počíta opakovania. Výsledky pripíše do "NV34 Bench.txt"
- * vedľa aplikácie spolu s aktívnym video driverom, aby sa dali porovnať behy
- * (COFB / NV34 NDRV bez cache / s write-through cache, rôzne hĺbky).
+ * Each test runs ~2 s and counts repetitions. Results are appended to "NV34 Bench.txt"
+ * next to the application together with the active video driver, so runs can be compared
+ * (COFB / NV34 NDRV without cache / with write-through cache, various depths).
  */
 #include <Quickdraw.h>
 #include <Windows.h>
@@ -76,12 +76,12 @@ static void driver_label(char *out)
     RegistryEntryIDDispose(&e);
 }
 
-/* ---- priamy prístup k pamäti: šírka prístupu rozhoduje pri necacheovanej VRAM ---- */
+/* ---- direct memory access: access width matters with uncached VRAM ---- */
 
 typedef struct MemSpan {
-    volatile UInt8 *base;   /* prvý riadok, zarovnaný na 16 B */
+    volatile UInt8 *base;   /* first row, aligned to 16 B */
     UInt32 rowBytes;        /* stride */
-    UInt32 bytes;           /* dĺžka jedného riadku (násobok 16) */
+    UInt32 bytes;           /* length of one row (multiple of 16) */
     UInt32 rows;
 } MemSpan;
 
@@ -108,7 +108,7 @@ static void read64(const MemSpan *g)
     (void)acc;
 }
 
-/* AltiVec: assembler Retro68 nepozná lvx/stvx → .long. VRSAVE označí v0 ako používaný. */
+/* AltiVec: the Retro68 assembler does not know lvx/stvx → .long. VRSAVE marks v0 as used. */
 static void vec_row(volatile const UInt8 *src, volatile UInt8 *dst, UInt32 bytes)
 {
     register volatile const UInt8 *a __asm__("r9") = src;
@@ -146,7 +146,7 @@ static void copy128(const MemSpan *src, const MemSpan *dst)
         vec_row(src->base + y * src->rowBytes, dst->base + y * dst->rowBytes, src->bytes);
 }
 
-/* Spustí `body` opakovane ~2 s, vráti počet opakovaní za sekundu ×100. */
+/* Runs `body` repeatedly for ~2 s, returns repetitions per second ×100. */
 #define RUN(var, body) do { \
         UInt32 t0 = TickCount(), n = 0; \
         while (TickCount() == t0) ; \
@@ -203,22 +203,22 @@ int main(void)
         LockPixels(gpm);
     }
 
-    /* 1. výplň obdĺžnika (iba zápis) */
+    /* 1. rectangle fill (write only) */
     RUN(fill, { ForeColor((n & 1) ? blackColor : redColor); PaintRect(&r); });
     ForeColor(blackColor);
 
-    /* 2. obrazovka → obrazovka (čítanie + zápis VRAM, ako ťahanie okna / scroll) */
+    /* 2. screen → screen (VRAM read + write, like dragging a window / scrolling) */
     RUN(s2s, CopyBits(&win->portBits, &win->portBits, (n & 1) ? &r2 : &r, (n & 1) ? &r : &r2, srcCopy, 0));
 
-    /* 3. offscreen → obrazovka (ako redraw okna z bufferu) */
+    /* 3. offscreen → screen (like redrawing a window from a buffer) */
     o2s = s2o = 0;
     if (gw) {
         RUN(o2s, CopyBits((BitMap *)*gpm, &win->portBits, &r, &r, srcCopy, 0));
-        /* 4. obrazovka → offscreen (čisté čítanie VRAM) */
+        /* 4. screen → offscreen (pure VRAM read) */
         RUN(s2o, CopyBits(&win->portBits, (BitMap *)*gpm, &r, &r, srcCopy, 0));
     }
 
-    /* 5. text: 40 riadkov Monaco 9 na opakovanie */
+    /* 5. text: 40 lines of Monaco 9 per repetition */
     EraseRect(&r);
     RUN(text, {
         for (i = 0; i < 40; i++) {
@@ -227,7 +227,7 @@ int main(void)
         }
     });
 
-    /* 6. priame čítanie/zápis VRAM rôznou šírkou + RAM pre porovnanie (tieňový FB) */
+    /* 6. direct VRAM read/write with various widths + RAM for comparison (shadow FB) */
     {
         Point tl = { 0, 0 };
         UInt32 rb = (**spm).rowBytes & 0x3fff, off;
@@ -262,7 +262,7 @@ int main(void)
             RUN1(r2v, copy128(&rr, &vr));
             DisposePtr(ram);
         }
-        RUN1(wr128, copy128(&vr, &vr));     /* čítanie aj zápis VRAM */
+        RUN1(wr128, copy128(&vr, &vr));     /* VRAM read and write */
         EraseRect(&r);
         rawRates[0] = rd32;
         rawRates[1] = rd64;
@@ -275,7 +275,7 @@ int main(void)
     driver_label(buf);
     line("NV34 Bench 2");
     line(buf);
-    sprintf(buf, "obrazovka %d x %d, %lu bpp; test %d x %d", qd.screenBits.bounds.right,
+    sprintf(buf, "screen %d x %d, %lu bpp; test %d x %d", qd.screenBits.bounds.right,
             qd.screenBits.bounds.bottom, bpp, W - 8, H);
     line(buf);
     sprintf(buf, "fill       %4lu.%02lu /s  %6lu KB/s", fill / 100, fill % 100, fill * (bytes / 1024) / 100);
@@ -286,7 +286,7 @@ int main(void)
     line(buf);
     sprintf(buf, "scr->off   %4lu.%02lu /s  %6lu KB/s", s2o / 100, s2o % 100, s2o * (bytes / 1024) / 100);
     line(buf);
-    sprintf(buf, "text       %4lu.%02lu /s  (40 riadkov)", text / 100, text % 100);
+    sprintf(buf, "text       %4lu.%02lu /s  (40 lines)", text / 100, text % 100);
     line(buf);
     {
         static const char *names[] = { "VRAM rd  4B", "VRAM rd  8B", "VRAM rd 16B",
@@ -303,9 +303,9 @@ int main(void)
             fprintf(f, "%s\n", gLines[i]);
         fprintf(f, "\n");
         fclose(f);
-        line("pripisane do \"NV34 Bench.txt\"");
+        line("appended to \"NV34 Bench.txt\"");
     }
-    line("klik = koniec");
+    line("click = quit");
     show(win);
 
     while (!Button())

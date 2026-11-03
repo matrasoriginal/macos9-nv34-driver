@@ -1,4 +1,4 @@
-# NV34 Accel — OS 9 PPC test 2D enginu (Retro68).
+# NV34 Accel — OS 9 PPC 2D engine test (Retro68).
 cmake_minimum_required(VERSION 3.10)
 project(NV34Accel C CXX)
 add_application(NV34Accel main.c ../accel/nv34_accel.c)

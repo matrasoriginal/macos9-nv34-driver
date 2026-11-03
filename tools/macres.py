@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Resource fork + MacBinary II pre OS 9 'ndrv' súbor.
+"""Resource fork + MacBinary II for an OS 9 'ndrv' file.
 
   macres.py ndrv INPUT.pef NAME OUTDIR [TYPE CREATOR]
 
-Vytvorí:
-  OUTDIR/NAME.rsrc   resource fork: 'cfrg' 0 (fragment v data forku) + 'vers' 1/2
-  OUTDIR/NAME.bin    MacBinary II (data + resource fork + type/creator) — prenos cez web/FAT/FTP,
-                     v OS 9 rozbaliť StuffIt Expanderom
+Creates:
+  OUTDIR/NAME.rsrc   resource fork: 'cfrg' 0 (fragment in the data fork) + 'vers' 1/2
+  OUTDIR/NAME.bin    MacBinary II (data + resource fork + type/creator) — transfer via web/FAT/FTP,
+                     unpack on OS 9 with StuffIt Expander
 
-Layout 'cfrg' kopíruje NVIDIA Driver 3.1 (usage = import library, where = data fork).
+The 'cfrg' layout copies NVIDIA Driver 3.1 (usage = import library, where = data fork).
 """
 import struct
 import os
@@ -26,7 +26,7 @@ def cfrg(name, length):
     nm = pstr(name)
     member_size = (42 + len(nm) + 3) & ~3
     member = struct.pack(">4sHBBIIIHBBIIII", b"pwpc", 0, 0, 0, 0, 0, 0, 0,
-                         0,          # usage: kImportLibraryCFrag (ako NVIDIA Driver)
+                         0,          # usage: kImportLibraryCFrag (like NVIDIA Driver)
                          1,          # where: kDataForkCFragLocator
                          0, length,  # offset, length
                          0, 0)       # reserved (8 B)
@@ -108,7 +108,7 @@ def main():
     type_ = (a[4] if len(a) > 4 else "ndrv").encode()
     creator = (a[5] if len(a) > 5 else "NV34").encode()
 
-    # verziu berieme z TheDriverDescription
+    # version is taken from TheDriverDescription
     sys.path.insert(0, str(Path(__file__).parent))
     import pef as peflib
     desc = peflib.PEF(pef).export_bytes("TheDriverDescription", 44)
@@ -117,8 +117,8 @@ def main():
     short = f"{major}.{minor_bug >> 4}" + (f".{minor_bug & 0xF}" if minor_bug & 0xF else "") + \
             (f"{stage_ch}{rev}" if stage_ch else "")
 
-    # knižnice bez TheDriverDescription (RAVE engine, MiniGL): verzia a popis z prostredia
-    info = "NV34 NDRV pre GeForce FX Go5200"
+    # libraries without TheDriverDescription (RAVE engine, MiniGL): version and info from the environment
+    info = "NV34 NDRV for GeForce FX Go5200"
     if os.environ.get("VERS"):
         parts = [int(x) for x in os.environ["VERS"].split(".")] + [0, 0]
         major, minor_bug, stage, rev = parts[0], (parts[1] << 4) | parts[2], 0x80, 0

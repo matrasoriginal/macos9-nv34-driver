@@ -1,15 +1,15 @@
 /*
- * NV34 3D engine bring-up. Zdroje (MIT):
+ * NV34 3D engine bring-up. Sources (MIT):
  *   Linux nouveau  nvkm/engine/gr/nv30.c (nv30_gr_init), nv34.c (nv34_gr_chan_new),
- *                  nv20.c (kontextová tabuľka, auto-prepínanie)
+ *                  nv20.c (context table, automatic switching)
  *   xf86-video-nouveau  nv30_exa.c (NVAccelInitNV30TCL)
- *   nv30-40_3d.xml.h    čísla metód
+ *   nv30-40_3d.xml.h    method numbers
  */
 #include "nv34_3d.h"
 
 #define PRAMIN      0x700000
 
-/* metódy NV30_3D (nv30-40_3d.xml.h) */
+/* NV30_3D methods (nv30-40_3d.xml.h) */
 #define M_OBJECT            0x0000
 #define M_FLIP_SET_READ     0x0120
 #define M_DMA_NOTIFY        0x0180
@@ -83,7 +83,7 @@ static NVU32 rd(NV3D *g, NVU32 reg)
     return nva_rd32(g->a, reg);
 }
 
-/* RAMHT (0x10000, 4 KB = 512 záznamov): hash podľa nouveau nv04_ramht */
+/* RAMHT (0x10000, 4 KB = 512 entries): hash per nouveau nv04_ramht */
 static void ramht_insert(NV3D *g, NVU32 handle, NVU32 context)
 {
     NVU32 h = handle, hash = 0, i;
@@ -111,18 +111,18 @@ int nv3d_init(NV3D *g, NVAccel *a, NVU32 fbOffset, NVU32 pitch, NVU32 width, NVU
     g->pitch = pitch;
     g->width = width;
     g->height = height;
-    g->scratchOffset = 0x01000000;      /* 16 MB: zeta (≤ 3 MB) — iba NV34 GL Test bez QD Accel */
-    g->fpOffset = 0x003F0000;           /* fragment programy: medzi framebufferom (≤ 3 MB + 16 KB)
-                                         * a alokátorom VRAM QD Accel (od 4 MB) */
+    g->scratchOffset = 0x01000000;      /* 16 MB: zeta (≤ 3 MB) — only NV34 GL Test without QD Accel */
+    g->fpOffset = 0x003F0000;           /* fragment programs: between the framebuffer (≤ 3 MB + 16 KB)
+                                         * and the QD Accel VRAM allocator (from 4 MB) */
 
     /* --- nv30_gr_init (Linux nouveau) --- */
-    wr(g, 0x400100, 0xFFFFFFFF);        /* INTR: zmazať */
-    wr(g, 0x400140, 0x00000000);        /* INTR_EN: bez prerušení (OS 9 handler nemáme) */
+    wr(g, 0x400100, 0xFFFFFFFF);        /* INTR: clear */
+    wr(g, 0x400140, 0x00000000);        /* INTR_EN: no interrupts (we have no OS 9 handler) */
     wr(g, 0x400080, 0xFFFFFFFF);        /* DEBUG_0 */
     wr(g, 0x400080, 0x00000000);
     wr(g, 0x400084, 0x401287c0);        /* DEBUG_1 */
     wr(g, 0x400890, 0x01b463ff);
-    wr(g, 0x40008c, 0xf2de0475);        /* DEBUG_3 (bit 2 = auto prepínanie kontextu) */
+    wr(g, 0x40008c, 0xf2de0475);        /* DEBUG_3 (bit 2 = automatic context switching) */
     wr(g, 0x400090, 0x00008000);        /* DEBUG_4 */
     wr(g, 0x400610, 0xf04bdff6);        /* LIMIT_VIOL_PIX */
     wr(g, 0x400B80, 0x1003d888);
@@ -149,9 +149,9 @@ int nv3d_init(NV3D *g, NVAccel *a, NVU32 fbOffset, NVU32 pitch, NVU32 width, NVU
     wr(g, 0x4009A4, rd(g, 0x100200));
     wr(g, 0x4009A8, rd(g, 0x100204));
 
-    /* tile regióny aj pre 3D: nv20_gr_tile zapisuje okrem PGRAPH 0x400900.. aj RDI tabuľky
-     * (EA0010 adresa, EA0030 limit, EA0050 pitch). Bez nich 3D kreslí do tiled framebuffera
-     * z OF, akoby bol lineárny → rozhádzané riadky (gl-2). */
+    /* tile regions for 3D too: besides PGRAPH 0x400900.. nv20_gr_tile also writes the RDI tables
+     * (EA0010 address, EA0030 limit, EA0050 pitch). Without them 3D draws into the tiled OF framebuffer
+     * as if it were linear → scrambled rows (gl-2). */
     for (i = 0; i < 8; i++) {
         NVU32 addr = rd(g, 0x100240 + i * 16);
         NVU32 limit = rd(g, 0x100244 + i * 16);
@@ -167,7 +167,7 @@ int nv3d_init(NV3D *g, NVAccel *a, NVU32 fbOffset, NVU32 pitch, NVU32 width, NVU
         wr(g, 0x400754, addr);
     }
 
-    /* --- kontext kanála 0 (nv34_gr_chan_new) --- */
+    /* --- channel 0 context (nv34_gr_chan_new) --- */
     for (i = 0; i < 0x46e0; i += 4)
         wr(g, ctx + i, 0);
     wr(g, ctx + 0x0028, 0x00000001);    /* | chid << 24, chid = 0 */
@@ -223,7 +223,7 @@ int nv3d_init(NV3D *g, NVAccel *a, NVU32 fbOffset, NVU32 pitch, NVU32 width, NVU
     wr(g, ctx + 0x2ef8, 0xbf800000);
     wr(g, ctx + 0x2f00, 0xbf800000);
 
-    /* tabuľka kontextov: kanál 0 → NV3D_INST_CTX */
+    /* context table: channel 0 → NV3D_INST_CTX */
     for (i = 0; i < 32 * 4; i += 4)
         wr(g, PRAMIN + NV3D_INST_CTXTAB + i, 0);
     wr(g, PRAMIN + NV3D_INST_CTXTAB, NV3D_INST_CTX >> 4);
@@ -233,23 +233,23 @@ int nv3d_init(NV3D *g, NVAccel *a, NVU32 fbOffset, NVU32 pitch, NVU32 width, NVU
     wr(g, 0x400714, 0xFFFFFFFF);        /* STATE */
     wr(g, 0x40075c, 0x00000001);
 
-    /* aktuálny kontext neplatný → prvá metóda kanála 0 načíta kontext z tabuľky */
+    /* current context invalid → the first method on channel 0 loads the context from the table */
     wr(g, 0x400144, 0x10000000);
     wr(g, 0x400148, (rd(g, 0x400148) & 0x00ffffff) | 0x1f000000);
 
-    /* --- objekty: 3D (0x0697) a DMA 0x3d cez celú VRAM --- */
-    wr(g, PRAMIN + NV3D_INST_3D + 0, 0x00080697);     /* BE príznak: správne farby (gl-4) */
+    /* --- objects: 3D (0x0697) and DMA 0x3d spanning all of VRAM --- */
+    wr(g, PRAMIN + NV3D_INST_3D + 0, 0x00080697);     /* BE flag: correct colors (gl-4) */
     wr(g, PRAMIN + NV3D_INST_3D + 4, 0);
     wr(g, PRAMIN + NV3D_INST_3D + 8, 0);
     wr(g, PRAMIN + NV3D_INST_3D + 12, 0);
     wr(g, PRAMIN + NV3D_INST_DMA + 0, 0x0000303d);     /* IN_MEMORY, VRAM, PT present+linear */
     wr(g, PRAMIN + NV3D_INST_DMA + 4, a->vramSize - 1);
-    wr(g, PRAMIN + NV3D_INST_DMA + 8, 0x00000002);     /* adresa 0, RW */
+    wr(g, PRAMIN + NV3D_INST_DMA + 8, 0x00000002);     /* address 0, RW */
     wr(g, PRAMIN + NV3D_INST_DMA + 12, 0x00000002);
     ramht_insert(g, NV3D_HANDLE_3D, 0x80010000 | (NV3D_INST_3D >> 4));
     ramht_insert(g, NV3D_HANDLE_VRAM, 0x80010000 | (NV3D_INST_DMA >> 4));
 
-    /* po načítaní kontextu sú väzby subkanálov preč → naviazať všetko znova */
+    /* after the context load the subchannel bindings are gone → bind everything again */
     for (i = 0; i < 7; i++) {
         nva_begin(a, i, M_OBJECT, 1);
         nva_push(a, 0x80000010 + i);
@@ -344,7 +344,7 @@ int nv3d_init(NV3D *g, NVAccel *a, NVU32 fbOffset, NVU32 pitch, NVU32 width, NVU
     data(g, F_0);
     data(g, F_1);
 
-    /* render target = framebuffer obrazovky (A8R8G8B8 linear + Z24S8 v scratch VRAM) */
+    /* render target = screen framebuffer (A8R8G8B8 linear + Z24S8 in scratch VRAM) */
     begin(g, M_RT_HORIZ, 5);
     data(g, width << 16);
     data(g, height << 16);
@@ -389,7 +389,7 @@ static NVU32 bswap32(NVU32 v)
     return (v >> 24) | ((v >> 8) & 0xff00) | ((v << 8) & 0xff0000) | (v << 24);
 }
 
-/* gl-5: s BE 3D objektom platí swapMode 1 (bez prehodenia bajtov) */
+/* gl-5: with the BE 3D object swapMode 1 applies (no byte swapping) */
 void nv3d_upload_fp(NV3D *g, const NVU32 *words, int count, int swapMode)
 {
     volatile NVU32 *dst = (volatile NVU32 *)(g->a->vram + g->fpOffset);
@@ -397,8 +397,8 @@ void nv3d_upload_fp(NV3D *g, const NVU32 *words, int count, int swapMode)
 
     for (i = 0; i < count; i++) {
         NVU32 v = words[i];
-        NVU32 hs = (v << 16) | (v >> 16);           /* PUSH_DATAs: polovice prehodené */
-        /* CPU je BE, GPU číta VRAM ako LE: swapMode 0 → GPU uvidí hs */
+        NVU32 hs = (v << 16) | (v >> 16);           /* PUSH_DATAs: halves swapped */
+        /* the CPU is BE, the GPU reads VRAM as LE: swapMode 0 → the GPU sees hs */
         dst[i] = swapMode == 0 ? bswap32(hs) : hs;
     }
     __asm__ volatile("sync" ::: "memory");
@@ -418,7 +418,7 @@ void nv3d_use_fp(NV3D *g, NVU32 fpControl, NVU32 regControl)
 
 void nv3d_rc_primary(NV3D *g)
 {
-    /* final = D = primárna farba, alfa G = primárna alfa; ako DDX: FINAL0, FINAL1, RC_ENABLE */
+    /* final = D = primary color, alpha G = primary alpha; like the DDX: FINAL0, FINAL1, RC_ENABLE */
     begin(g, M_RC_FINAL0, 3);
     data(g, 0x00000004);                /* D_INPUT_PRIMARY_COLOR */
     data(g, 0x00001400);                /* G = PRIMARY_COLOR | alpha */
@@ -436,12 +436,12 @@ void nv3d_triangle(NV3D *g, int x0, int y0, int x1, int y1, int x2, int y2,
     begin(g, M_VERTEX_BEGIN_END, 1);
     data(g, 0x00000005);                /* TRIANGLES */
     for (i = 0; i < 3; i++) {
-        begin(g, M_VTX_ATTR_4F(3), 4);  /* farba (atribút 3) */
+        begin(g, M_VTX_ATTR_4F(3), 4);  /* color (attribute 3) */
         data(g, r);
         data(g, gr);
         data(g, b);
         data(g, al);
-        begin(g, M_VTX_ATTR_2I(0), 1);  /* pozícia (atribút 0) vypustí vrchol */
+        begin(g, M_VTX_ATTR_2I(0), 1);  /* position (attribute 0) emits the vertex */
         data(g, ((NVU32)(ys[i] & 0xffff) << 16) | (NVU32)(xs[i] & 0xffff));
     }
     begin(g, M_VERTEX_BEGIN_END, 1);
@@ -467,8 +467,8 @@ void nv3d_trap(NV3D *g, NV3DTrap *t)
     t->cacheGet = rd(g, 0x003270);
     t->cachePut = rd(g, 0x003210);
     if (t->intr) {
-        wr(g, 0x400100, t->intr);       /* potvrdiť */
-        wr(g, 0x400720, 0x00000001);    /* PGRAPH FIFO pokračuje */
+        wr(g, 0x400100, t->intr);       /* acknowledge */
+        wr(g, 0x400720, 0x00000001);    /* PGRAPH FIFO continues */
     }
 }
 
@@ -483,10 +483,10 @@ void nv3d_object_be(NV3D *g, int be)
 
 void nv3d_rc_modulate_tex(NV3D *g)
 {
-    /* stupeň 0: A = textúra0 (fragprog H0, zdroj 0x08), B = primárna farba (0x04), A×B → spare0
+    /* stage 0: A = texture0 (fragprog H0, source 0x08), B = primary color (0x04), A×B → spare0
      * (xf86-video-nouveau NV30EXAPrepareComposite) */
     begin(g, M_RC_IN_ALPHA(0), 6);
-    data(g, (0x18u << 24) | (0x14u << 16));     /* alfa: tex0.a × prim.a */
+    data(g, (0x18u << 24) | (0x14u << 16));     /* alpha: tex0.a × prim.a */
     data(g, (0x08u << 24) | (0x04u << 16));     /* rgb:  tex0.rgb × prim.rgb */
     data(g, 0);                                 /* RC_COLOR0 */
     data(g, 0);                                 /* RC_COLOR1 */
@@ -527,7 +527,7 @@ static void vtx_tex(NV3D *g, int x, int y, int s, int t, NVU32 r, NVU32 gr, NVU3
     data(g, gr);
     data(g, b);
     data(g, al);
-    begin(g, M_VTX_ATTR_2I(8), 1);              /* textúrové súradnice 0 (atribút 8) */
+    begin(g, M_VTX_ATTR_2I(8), 1);              /* texture coordinates 0 (attribute 8) */
     data(g, ((NVU32)(t & 0xffff) << 16) | (NVU32)(s & 0xffff));
     begin(g, M_VTX_ATTR_2I(0), 1);
     data(g, ((NVU32)(y & 0xffff) << 16) | (NVU32)(x & 0xffff));
@@ -576,10 +576,10 @@ void nv3d_depth(NV3D *g, int enable, NVU32 zScale)
 
 void nv3d_clear_depth(NV3D *g)
 {
-    begin(g, M_DEPTH_WRITE_ENABLE, 1);          /* gl-8: so zápisom hĺbky; ffffff00 nefungoval */
+    begin(g, M_DEPTH_WRITE_ENABLE, 1);          /* gl-8: with depth write; ffffff00 did not work */
     data(g, 1);
     begin(g, M_CLEAR_DEPTH_VALUE, 1);
-    data(g, 0xffffffff);                        /* hĺbka 1.0 (stencil ff) */
+    data(g, 0xffffffff);                        /* depth 1.0 (stencil ff) */
     begin(g, M_CLEAR_BUFFERS, 1);
     data(g, 0x00000003);                        /* DEPTH | STENCIL */
     nva_kickoff(g->a);
@@ -644,7 +644,7 @@ void nv3d_texture_swz(NV3D *g, NVU32 vramOffset, NVU32 log2w, NVU32 log2h)
     data(g, (1u << 16) | 0x08 | 0x20 | 0x600 | (log2w << 20) | (log2h << 24) | 0x01);
     data(g, (1u << 0) | (1u << 8) | (1u << 16));          /* WRAP: REPEAT */
     data(g, 0x40000000);
-    data(g, 0xAAE4);                                      /* SWIZZLE a8r8g8b8 (bez rect pitch) */
+    data(g, 0xAAE4);                                      /* SWIZZLE a8r8g8b8 (no rect pitch) */
     data(g, 0x00020000 | 0x02000000 | 0x2000);            /* FILTER: linear */
     data(g, ((1u << log2w) << 16) | (1u << log2h));
     data(g, 0);
@@ -687,7 +687,7 @@ void nv3d_clear_depth_value(NV3D *g, NVU32 value, int writeEnable)
 {
     begin(g, M_DEPTH_WRITE_ENABLE, 1);
     data(g, writeEnable);
-    begin(g, 0x032c, 1);                        /* STENCIL_MASK (stupeň 0) = 0xff, aby clear zapísal stencil */
+    begin(g, 0x032c, 1);                        /* STENCIL_MASK (stage 0) = 0xff so that the clear writes stencil */
     data(g, 0xff);
     begin(g, M_CLEAR_DEPTH_VALUE, 1);
     data(g, value);

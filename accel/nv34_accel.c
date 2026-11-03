@@ -1,5 +1,5 @@
 /*
- * NV34 2D engine — port z xf86-video-nv (MIT):
+ * NV34 2D engine — ported from xf86-video-nv (MIT):
  *
  * Copyright (c) 2003 NVIDIA, Corporation
  *
@@ -22,9 +22,9 @@
  * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  *
- * Zmeny: iba cesta NV_ARCH_30 (NV34), bez CRTC časti, bez PTIMER, PFB tile regióny
- * sa nemenia (OF ich používa pre framebuffer), timeouty,
- * big-endian objekty voliteľné za behu, nezávislé od X/OS.
+ * Changes: only the NV_ARCH_30 (NV34) path, no CRTC part, no PTIMER, PFB tile regions
+ * are left unchanged (OF uses them for the framebuffer), timeouts,
+ * big-endian objects selectable at run time, independent of X/OS.
  */
 #include "nv34_accel.h"
 
@@ -65,7 +65,7 @@ void nva_wr32(NVAccel *a, NVU32 reg, NVU32 val)
 #define RD(r)       nva_rd32(a, (r))
 #define WR(r, v)    wr32(a, (r), (v))
 
-/* bloky registrov (xf86 nv_setup.c) */
+/* register blocks (xf86 nv_setup.c) */
 #define PMC         0x000000
 #define PFIFO       0x002000
 #define PFB         0x100000
@@ -73,11 +73,11 @@ void nva_wr32(NVAccel *a, NVU32 reg, NVU32 val)
 #define PRAMIN      0x710000
 #define USER_FIFO   0x800000
 
-/* xf86 indexuje PFIFO a PRAMIN po dwordoch, PGRAPH/PFB/PMC po bajtoch/4 → tu všetko v bajtoch */
+/* xf86 indexes PFIFO and PRAMIN in dwords, PGRAPH/PFB/PMC in bytes/4 → here everything is in bytes */
 #define PFIFO_D(i)  (PFIFO + (i) * 4)
 #define PRAMIN_D(i) (PRAMIN + (i) * 4)
 
-/* ---- inicializácia (NVLoadStateExt, state == NULL, NV_ARCH_30) --------- */
+/* ---- initialization (NVLoadStateExt, state == NULL, NV_ARCH_30) --------- */
 
 void nva_init_engine(NVAccel *a)
 {
@@ -90,27 +90,27 @@ void nva_init_engine(NVAccel *a)
         a->dmaSize = 32 * 1024;
     }
 
-    WR(PMC + 0x0140, 0x00000000);           /* prerušenia z GPU vypnuté */
-    WR(PMC + 0x0200, 0xFFFF00FF);           /* reset PFIFO/PGRAPH (bity 8–15) */
+    WR(PMC + 0x0140, 0x00000000);           /* GPU interrupts off */
+    WR(PMC + 0x0200, 0xFFFF00FF);           /* reset PFIFO/PGRAPH (bits 8–15) */
     WR(PMC + 0x0200, 0xFFFFFFFF);
 
-    /* xf86 tu zapisuje aj PTIMER — vynechané (na Macu ho nik nepotrebuje). */
+    /* xf86 also writes PTIMER here — skipped (nobody on the Mac needs it). */
 
-    /* xf86 tu tile regióny PFB 0x240.. vynuluje. Na PB 6,2 je framebuffer z OF v tile regióne:
-     * vypnutie zmení rozloženie VRAM pre scanout aj CPU → starý obsah obrazovky sa rozsype
-     * (NV34 Accel 1). Regióny nechávame a nižšie ich iba zrkadlíme do PGRAPH. */
+    /* xf86 clears the PFB tile regions 0x240.. here. On the PB 6,2 the OF framebuffer is in a tile region:
+     * disabling it changes the VRAM layout for both scanout and CPU → the old screen contents get scrambled
+     * (NV34 Accel 1). We keep the regions and only mirror them into PGRAPH below. */
 
-    /* RAMHT (4 KB): vynulovať — xf86 zapisuje iba svojich 8 položiek a zvyšok PRAMIN obsahuje
-     * starý obsah VRAM; ďalší handle by sa vložil mimo okna, ktoré PFIFO prehľadáva (gl-1). */
+    /* RAMHT (4 KB): clear it — xf86 only writes its 8 entries and the rest of PRAMIN holds
+     * stale VRAM contents; the next handle would land outside the window PFIFO searches (gl-1). */
     for (i = 0; i < 0x1000; i += 4)
         WR(PRAMIN + i, 0);
-    /* handle 0x80000010..17 → objekty (hash(h) = index, kanál 0, engine PGRAPH) */
+    /* handles 0x80000010..17 → objects (hash(h) = index, channel 0, engine PGRAPH) */
     for (i = 0; i < 8; i++) {
         WR(PRAMIN_D(i * 2), 0x80000010 + i);
         WR(PRAMIN_D(i * 2 + 1), 0x80011201 + i);
     }
 
-    /* 0x1200: DMA objekt cez celú VRAM */
+    /* 0x1200: DMA object spanning all of VRAM */
     WR(PRAMIN_D(0x0800), 0x00003000);
     WR(PRAMIN_D(0x0801), fbMapSize - 1);
     WR(PRAMIN_D(0x0802), 0x00000002);
@@ -155,7 +155,7 @@ void nva_init_engine(NVAccel *a)
     WR(PRAMIN_D(0x0821), 0x00000000);
     WR(PRAMIN_D(0x0822), 0x12001200);
     WR(PRAMIN_D(0x0823), 0x00000000);
-    /* 0x1209: DMA objekt push buffera (dmaSize na dmaOffset) */
+    /* 0x1209: push buffer DMA object (dmaSize at dmaOffset) */
     WR(PRAMIN_D(0x0824), 0x00003002);
     WR(PRAMIN_D(0x0825), a->dmaSize - 1);
     WR(PRAMIN_D(0x0826), a->dmaOffset | 0x00000002);
@@ -213,18 +213,18 @@ void nva_init_engine(NVAccel *a)
     WR(PGRAPH + 0x0544, 0x00007FFF);
     WR(PGRAPH + 0x0548, 0x00007FFF);
 
-    /* PFIFO: kanál 0 v DMA režime */
-    WR(PFIFO_D(0x0140), 0x00000000);        /* CACHES vypnuté počas nastavovania */
+    /* PFIFO: channel 0 in DMA mode */
+    WR(PFIFO_D(0x0140), 0x00000000);        /* CACHES off during setup */
     WR(PFIFO_D(0x0141), 0x00000001);
     WR(PFIFO_D(0x0480), 0x00000000);
     WR(PFIFO_D(0x0494), 0x00000000);
-    WR(PFIFO_D(0x0481), 0x00000100);        /* CACHE1_PUSH1: kanál 0, DMA */
+    WR(PFIFO_D(0x0481), 0x00000100);        /* CACHE1_PUSH1: channel 0, DMA */
     WR(PFIFO_D(0x0490), 0x00000000);        /* DMA_PUT */
     WR(PFIFO_D(0x0491), 0x00000000);        /* DMA_GET */
-    WR(PFIFO_D(0x048B), 0x00001209);        /* DMA_INSTANCE → objekt push buffera */
+    WR(PFIFO_D(0x048B), 0x00001209);        /* DMA_INSTANCE → push buffer object */
     WR(PFIFO_D(0x0400), 0x00000000);
     WR(PFIFO_D(0x0414), 0x00000000);
-    WR(PFIFO_D(0x0084), 0x03000100);        /* RAMHT na 0x10000 */
+    WR(PFIFO_D(0x0084), 0x03000100);        /* RAMHT at 0x10000 */
     WR(PFIFO_D(0x0085), 0x00000110);        /* RAMFC */
     WR(PFIFO_D(0x0086), 0x00000112);        /* RAMRO */
     WR(PFIFO_D(0x0143), 0x0000FFFF);
@@ -239,7 +239,7 @@ void nva_init_engine(NVAccel *a)
     WR(PFIFO_D(0x0480), 0x00000001);        /* CACHE1_PUSH0 */
     WR(PFIFO_D(0x0494), 0x00000001);        /* CACHE1_PULL0 */
     WR(PFIFO_D(0x0495), 0x00000001);
-    WR(PFIFO_D(0x0140), 0x00000001);        /* CACHES zapnuté */
+    WR(PFIFO_D(0x0140), 0x00000001);        /* CACHES on */
 }
 
 /* ---- push buffer (nv_xaa.c) ---------------------------------------------- */
@@ -251,8 +251,8 @@ void nva_init_engine(NVAccel *a)
 static void write_put(NVAccel *a, NVU32 put)
 {
     volatile NVU8 scratch;
-    __asm__ volatile("sync" ::: "memory");  /* zápisy push buffera do VRAM pred PUT */
-    scratch = a->vram[0];                   /* vyprázdni posted writes (xf86: FbStart[0]) */
+    __asm__ volatile("sync" ::: "memory");  /* push buffer writes to VRAM before PUT */
+    scratch = a->vram[0];                   /* flush posted writes (xf86: FbStart[0]) */
     (void)scratch;
     WR(USER_FIFO + 0x40, put << 2);
 }
@@ -282,7 +282,7 @@ static int dma_wait(NVAccel *a, NVU32 size)
         if (a->dmaPut >= get) {
             a->dmaFree = a->dmaMax - a->dmaCurrent;
             if (a->dmaFree < size) {
-                DMA_NEXT(0x20000000);       /* jump na začiatok */
+                DMA_NEXT(0x20000000);       /* jump to the start */
                 if (get <= SKIPS) {
                     if (a->dmaPut <= SKIPS)
                         write_put(a, SKIPS + 1);
@@ -321,7 +321,7 @@ void nva_kickoff(NVAccel *a)
     }
 }
 
-/* metódy (nv_dma.h): subkanál << 13 | metóda */
+/* methods (nv_dma.h): subchannel << 13 | method */
 #define SURFACE_FORMAT      0x00000300
 #define ROP_SET             0x00002300
 #define PATTERN_FORMAT      0x00004300
@@ -333,8 +333,8 @@ void nva_kickoff(NVAccel *a)
 #define LINE_FORMAT         0x00008300
 #define CLIP_POINT          0x00006300
 
-/* Formáty: surface / pattern / rect. Raw (Y8/Y16/Y32) nekonvertuje kanály — pri X8R8G8B8 engine
- * nuluje "X" bajt, čo je pri LE pohľade na BE framebuffer modrá (qd-7: okná zožltli). */
+/* Formats: surface / pattern / rect. Raw (Y8/Y16/Y32) does not convert channels — with X8R8G8B8 the engine
+ * zeroes the "X" byte, which in an LE view of a BE framebuffer is blue (qd-7: windows turned yellow). */
 static void pick_formats(NVAccel *a, NVU32 depth, NVU32 *surf, NVU32 *pat, NVU32 *rect)
 {
     switch (depth) {
@@ -346,7 +346,7 @@ static void pick_formats(NVAccel *a, NVU32 depth, NVU32 *surf, NVU32 *pat, NVU32
         break;
     case 15:
     case 16:
-        *surf = a->rawFormats ? 5 : 4;      /* Y16 / R5G6B5 (xf86 aj pre 15) */
+        *surf = a->rawFormats ? 5 : 4;      /* Y16 / R5G6B5 (xf86 uses it for 15 too) */
         *pat = 1;
         *rect = 1;
         break;
@@ -373,7 +373,7 @@ static int emit_surface(NVAccel *a, NVU32 depth, NVU32 pitch, NVU32 surfOffset)
         return kNVATimeout;
     DMA_NEXT(surf);
     DMA_NEXT(pitch | (pitch << 16));
-    DMA_NEXT(surfOffset);               /* xf86: 0 (FB na začiatku VRAM); Mac: fboffset */
+    DMA_NEXT(surfOffset);               /* xf86: 0 (FB at the start of VRAM); Mac: fboffset */
     DMA_NEXT(surfOffset);
     dma_start(a, PATTERN_FORMAT, 1);
     DMA_NEXT(pat);
@@ -393,11 +393,11 @@ int nva_reset_graphics(NVAccel *a, NVU32 depth, NVU32 pitch, NVU32 surfOffset)
     if (pitch == 0 || pitch > 0x7fff || (surfOffset & 63))
         return kNVABadArgs;
 
-    /* iba hneď po nva_init_engine: DMA_GET/PUT sú 0, buffer začína odznova */
+    /* only right after nva_init_engine: DMA_GET/PUT are 0, the buffer starts over */
     a->dmaBase = (volatile NVU32 *)(a->vram + a->dmaOffset);
     for (i = 0; i < SKIPS; i++)
         a->dmaBase[i] = 0;
-    /* subkanál i ← objekt 0x80000010 + i */
+    /* subchannel i ← object 0x80000010 + i */
     for (i = 0; i < 8; i++) {
         a->dmaBase[SKIPS + i * 2] = 0x00040000 | (i << 13);
         a->dmaBase[SKIPS + i * 2 + 1] = 0x80000010 + i;
@@ -410,7 +410,7 @@ int nva_reset_graphics(NVAccel *a, NVU32 depth, NVU32 pitch, NVU32 surfOffset)
     return emit_2d_state(a, depth, pitch, surfOffset);
 }
 
-/* povrch + klip + ROP (časť resetu, ktorá nemení push buffer) */
+/* surface + clip + ROP (the part of the reset that does not touch the push buffer) */
 static int emit_2d_state(NVAccel *a, NVU32 depth, NVU32 pitch, NVU32 surfOffset)
 {
     int err = emit_surface(a, depth, pitch, surfOffset);
@@ -422,7 +422,7 @@ static int emit_2d_state(NVAccel *a, NVU32 depth, NVU32 pitch, NVU32 surfOffset)
     DMA_NEXT(0);
     DMA_NEXT(0x7FFF7FFF);
 
-    /* NVSetRopSolid(GXcopy, ~0): vzor = samé jednotky, ROP 0xCC (copy) */
+    /* NVSetRopSolid(GXcopy, ~0): pattern = all ones, ROP 0xCC (copy) */
     dma_start(a, PATTERN_COLOR_0, 4);
     DMA_NEXT(~0UL);
     DMA_NEXT(~0UL);
@@ -439,7 +439,7 @@ static int emit_2d_state(NVAccel *a, NVU32 depth, NVU32 pitch, NVU32 surfOffset)
 int nva_restore_2d(NVAccel *a)
 {
     int i;
-    /* subkanály 0–6 ← 2D objekty (po načítaní PGRAPH kontextu z 3D initu) */
+    /* subchannels 0–6 ← 2D objects (after the PGRAPH context load from the 3D init) */
     for (i = 0; i < 7; i++) {
         if (nva_begin(a, i, 0, 1) != kNVAOK)
             return kNVATimeout;
@@ -484,7 +484,7 @@ void nva_copy_from(NVAccel *a, NVU32 srcOffset, NVU32 srcPitch, int sx, int sy, 
     DMA_NEXT(srcOffset);
     DMA_NEXT(a->surfOffset);
     nva_copy(a, sx, sy, dx, dy, w, h);
-    dma_start(a, SURFACE_FORMAT, 4);            /* späť: zdroj = obrazovka */
+    dma_start(a, SURFACE_FORMAT, 4);            /* back: source = screen */
     DMA_NEXT(surf);
     DMA_NEXT(a->pitch | (a->pitch << 16));
     DMA_NEXT(a->surfOffset);

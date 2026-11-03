@@ -1,4 +1,4 @@
-# NV34 MiniGL — vlastná „OpenGLLibrary“ (OpenGL 1.1 + AGL) pre hry, do priečinka hry.
+# NV34 MiniGL — custom "OpenGLLibrary" (OpenGL 1.1 + AGL) for games, goes in the game folder.
 RETRO68    ?= $(HOME)/Retro68-build/toolchain
 CC         := $(RETRO68)/bin/powerpc-apple-macos-gcc
 NM         := $(RETRO68)/bin/powerpc-apple-macos-nm

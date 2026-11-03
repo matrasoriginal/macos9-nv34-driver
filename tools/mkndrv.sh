@@ -1,13 +1,13 @@
 #!/bin/sh
-# Zabalí PEF data fork ako Mac OS 9 'ndrv' súbor pre System Folder:Extensions.
+# Wraps a PEF data fork as a Mac OS 9 'ndrv' file for System Folder:Extensions.
 #
-#   tools/mkndrv.sh INPUT.pef "Meno v OS 9" [OUTDIR]
+#   tools/mkndrv.sh INPUT.pef "Name in OS 9" [OUTDIR]
 #
-# Výstup v OUTDIR (default dist/):
-#   <meno>            data fork + resource fork ('cfrg', 'vers') + type 'ndrv' / creator 'NV34'
-#                     (kopírovať iba cez HFS/HFS+ alebo AFP — FAT/FTP/web forky a typ zahodí)
-#   <meno>.bin        MacBinary II — bezpečný prenos cez čokoľvek, v OS 9 rozbaliť StuffIt Expanderom
-#   <meno>.dsk        1.4 MB HFS obraz (Disk Copy / ShrinkWrap / FloppyEmu)
+# Output in OUTDIR (default dist/):
+#   <name>            data fork + resource fork ('cfrg', 'vers') + type 'ndrv' / creator 'NV34'
+#                     (copy only via HFS/HFS+ or AFP — FAT/FTP/web drop the forks and type)
+#   <name>.bin        MacBinary II — safe to transfer any way, unpack on OS 9 with StuffIt Expander
+#   <name>.dsk        1.4 MB HFS image (Disk Copy / ShrinkWrap / FloppyEmu)
 set -eu
 
 IN=$1

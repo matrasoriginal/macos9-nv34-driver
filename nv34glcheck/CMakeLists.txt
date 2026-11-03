@@ -1,4 +1,4 @@
-# NV34 GL Check — diagnostika načítania OpenGLLibrary / ref_gl.lib cez CFM (Retro68 PPC).
+# NV34 GL Check — diagnoses loading of OpenGLLibrary / ref_gl.lib via CFM (Retro68 PPC).
 cmake_minimum_required(VERSION 3.10)
 project(NV34GLCheck C CXX)
 add_application(NV34GLCheck main.c)

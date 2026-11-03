@@ -1,10 +1,10 @@
-# Všetko pre test na PowerBooku na jednom HFS obraze:
+# Everything for testing on the PowerBook on a single HFS image:
 #   NV34 NDRV           driver
-#   NV34 Info, NV34 Bench, NV34 Accel (test 2D enginu)
-#   NV34 GL Test        prvý 3D trojuholník (fáza 4)
-#   NV34 QD Accel       INIT (68k stub + PPC fragment): GPU CopyBits obrazovka → obrazovka
+#   NV34 Info, NV34 Bench, NV34 Accel (2D engine test)
+#   NV34 GL Test        first 3D triangle (phase 4)
+#   NV34 QD Accel       INIT (68k stub + PPC fragment): GPU CopyBits screen → screen
 #   NV34 RAVE           QuickDraw 3D RAVE engine ('shlb'/'tnsl', Extensions) + NV34 RAVE Test
-#   NV34 MiniGL         vlastná OpenGLLibrary pre hry (do priečinka hry, nie do Extensions)
+#   NV34 MiniGL         custom OpenGLLibrary for games (goes in the game folder, not Extensions)
 #   make            → dist/NV34 test.dsk + dist/*.bin
 RETRO68 ?= $(HOME)/Retro68-build/toolchain
 H := $(RETRO68)/bin
@@ -73,31 +73,31 @@ clean:
 	$(MAKE) -C minigl clean
 	$(MAKE) -C nv34qd clean
 
-# Balík na inštaláciu: dist/NV34 Release.dsk (priečinky podľa cieľa + Citaj ma) — docs/INSTALL.md
+# Installation package: dist/NV34 Release.dsk (folders by destination + Read Me) — docs/INSTALL.md
 R := :NV34 GeForce FX
 release: driver apps
-	python3 tools/mkreadme.py docs/INSTALL.md dist/Citaj_ma.txt
+	python3 tools/mkreadme.py docs/INSTALL.md dist/ReadMe.txt
 	rm -f "dist/NV34 Release.dsk"
 	dd if=/dev/zero of="dist/NV34 Release.dsk" bs=1024 count=8192 2>/dev/null
 	$(H)/hformat -l "NV34 Release" "dist/NV34 Release.dsk" >/dev/null
 	$(H)/hmount "dist/NV34 Release.dsk" >/dev/null
 	$(H)/hmkdir "$(R)"
-	$(H)/hmkdir "$(R):Do Extensions"
-	$(H)/hmkdir "$(R):Do priecinka hry"
-	$(H)/hmkdir "$(R):Nastroje"
-	$(H)/hcopy -t dist/Citaj_ma.txt "$(R):Citaj ma"
-	$(H)/hattrib -t TEXT -c ttxt "$(R):Citaj ma"
-	$(H)/hcopy -m "dist/NV34 NDRV.bin" "$(R):Do Extensions:NV34 NDRV"
-	$(H)/hcopy -m dist/NV34QD.bin "$(R):Do Extensions:NV34 QD Accel"
-	$(H)/hcopy -m dist/NV34RAVE.bin "$(R):Do Extensions:NV34 RAVE"
-	$(H)/hcopy -m dist/OpenGLLibrary.bin "$(R):Do priecinka hry:OpenGLLibrary"
-	$(H)/hcopy -r "minigl/NV34 MiniGL config" "$(R):Do priecinka hry:NV34 MiniGL config"
-	$(H)/hattrib -t TEXT -c ttxt "$(R):Do priecinka hry:NV34 MiniGL config"
-	$(H)/hcopy -m dist/NV34Info.bin "$(R):Nastroje:NV34 Info"
-	$(H)/hcopy -m dist/NV34GLCheck.bin "$(R):Nastroje:NV34 GL Check"
-	$(H)/hcopy -m dist/NV34DSpTest.bin "$(R):Nastroje:NV34 DSp Test"
-	$(H)/hcopy -m dist/NV34RAVETest.bin "$(R):Nastroje:NV34 RAVE Test"
-	$(H)/hcopy -m dist/NV34CPU.bin "$(R):Nastroje:NV34 CPU"
+	$(H)/hmkdir "$(R):For Extensions"
+	$(H)/hmkdir "$(R):For Game Folder"
+	$(H)/hmkdir "$(R):Tools"
+	$(H)/hcopy -t dist/ReadMe.txt "$(R):Read Me"
+	$(H)/hattrib -t TEXT -c ttxt "$(R):Read Me"
+	$(H)/hcopy -m "dist/NV34 NDRV.bin" "$(R):For Extensions:NV34 NDRV"
+	$(H)/hcopy -m dist/NV34QD.bin "$(R):For Extensions:NV34 QD Accel"
+	$(H)/hcopy -m dist/NV34RAVE.bin "$(R):For Extensions:NV34 RAVE"
+	$(H)/hcopy -m dist/OpenGLLibrary.bin "$(R):For Game Folder:OpenGLLibrary"
+	$(H)/hcopy -r "minigl/NV34 MiniGL config" "$(R):For Game Folder:NV34 MiniGL config"
+	$(H)/hattrib -t TEXT -c ttxt "$(R):For Game Folder:NV34 MiniGL config"
+	$(H)/hcopy -m dist/NV34Info.bin "$(R):Tools:NV34 Info"
+	$(H)/hcopy -m dist/NV34GLCheck.bin "$(R):Tools:NV34 GL Check"
+	$(H)/hcopy -m dist/NV34DSpTest.bin "$(R):Tools:NV34 DSp Test"
+	$(H)/hcopy -m dist/NV34RAVETest.bin "$(R):Tools:NV34 RAVE Test"
+	$(H)/hcopy -m dist/NV34CPU.bin "$(R):Tools:NV34 CPU"
 	$(H)/hls -lR ":"
 	$(H)/humount >/dev/null
 

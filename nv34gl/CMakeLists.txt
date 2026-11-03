@@ -1,4 +1,4 @@
-# NV34 GL Test — prvý 3D trojuholník (Retro68 PPC).
+# NV34 GL Test — first 3D triangle (Retro68 PPC).
 cmake_minimum_required(VERSION 3.10)
 project(NV34GL C CXX)
 add_application(NV34GL main.c ../accel/nv34_accel.c ../accel/nv34_3d.c)

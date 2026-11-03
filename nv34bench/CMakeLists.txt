@@ -1,4 +1,4 @@
-# NV34 Bench — OS 9 PPC aplikácia (Retro68), meranie softvérového QuickDraw.
+# NV34 Bench — OS 9 PPC application (Retro68), software QuickDraw benchmark.
 cmake_minimum_required(VERSION 3.10)
 project(NV34Bench C CXX)
 add_application(NV34Bench main.c)

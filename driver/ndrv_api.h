@@ -1,9 +1,9 @@
 /*
- * Minimálna podmnožina Apple Universal Interfaces 3.4 pre natívny video driver
+ * Minimal subset of Apple Universal Interfaces 3.4 for a native video driver
  * (Devices.h, Video.h, NameRegistry.h, DriverServices.h, VideoServices.h).
  *
- * Multiversal Interfaces z Retro68 tieto hlavičky nemajú, preto sú tu prepísané
- * ručne. Toolbox štruktúry používajú zarovnanie mac68k (= #pragma pack(2)).
+ * Retro68's Multiversal Interfaces lack these headers, so they are rewritten here
+ * by hand. Toolbox structures use mac68k alignment (= #pragma pack(2)).
  */
 #ifndef NDRV_API_H
 #define NDRV_API_H
@@ -113,7 +113,7 @@ typedef struct CntrlParam {
     SInt16      csParam[11];
 } CntrlParam;
 
-/* Video csParam obsahuje na začiatku pointer na záznam (VDPageInfo, ...) */
+/* Video csParam starts with a pointer to the record (VDPageInfo, ...) */
 static inline void *CS_PARAM_PTR(void *pb)
 {
     const SInt16 *w = ((CntrlParam *)pb)->csParam;
@@ -401,7 +401,7 @@ typedef struct VDClutBehaviorRec {
 
 #pragma pack(pop)
 
-/* Kontrola layoutu proti Universal Interfaces (mac68k zarovnanie). */
+/* Layout check against Universal Interfaces (mac68k alignment). */
 #define NDRV_STATIC_ASSERT(c, n) typedef char ndrv_assert_##n[(c) ? 1 : -1]
 NDRV_STATIC_ASSERT(sizeof(DriverInitInfo) == 18, DriverInitInfo);
 NDRV_STATIC_ASSERT(sizeof(CntrlParam) == 50, CntrlParam);
@@ -414,7 +414,7 @@ NDRV_STATIC_ASSERT(sizeof(VDVideoParametersInfoRec) == 22, VDVideoParametersInfo
 NDRV_STATIC_ASSERT(sizeof(VDDisplayConnectInfoRec) == 16, VDDisplayConnectInfoRec);
 NDRV_STATIC_ASSERT(sizeof(DriverDescription) == 128, DriverDescription);
 
-/* ---- importy: DriverServicesLib ---------------------------------------- */
+/* ---- imports: DriverServicesLib ---------------------------------------- */
 
 typedef OSStatus (*SecondaryInterruptHandler2)(void *p1, void *p2);
 typedef struct OpaqueTimerID *TimerID;
@@ -443,7 +443,7 @@ enum {
 
 extern void     SetProcessorCacheMode(AddressSpaceID spaceID, void *address, UInt32 length, ProcessorCacheMode cacheMode);
 
-/* ---- importy: NameRegistryLib ------------------------------------------ */
+/* ---- imports: NameRegistryLib ------------------------------------------ */
 
 extern OSStatus RegistryEntryIDCopy(const RegEntryID *src, RegEntryID *dst);
 extern OSStatus RegistryEntryIDDispose(RegEntryID *id);
@@ -455,7 +455,7 @@ extern OSStatus RegistryEntryToPathSize(const RegEntryID *e, RegPathNameSize *si
 extern OSStatus RegistryCStrEntryToPath(const RegEntryID *e, RegCStrPathName *path, RegPathNameSize size);
 extern OSStatus RegistryCStrEntryLookup(const RegEntryID *searchPoint, const RegCStrPathName *path, RegEntryID *found);
 
-/* ---- importy: VideoServicesLib ----------------------------------------- */
+/* ---- imports: VideoServicesLib ----------------------------------------- */
 
 typedef UInt32 InterruptServiceIDType;
 #define kVBLInterruptServiceType FOURCC('v', 'b', 'l', ' ')

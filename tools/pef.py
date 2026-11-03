@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""PEF (Preferred Executable Format) helper pre Mac OS 9 NDRV.
+"""PEF (Preferred Executable Format) helper for Mac OS 9 NDRVs.
 
-  pef.py info FILE              sekcie, importy, exporty, TheDriverDescription
-  pef.py scan FILE...           nájde PEF kontajnery vnorené v ľubovoľnom súbore
-                                (OS X kext binárka, ioreg dump, ROM obraz)
-  pef.py extract FILE OUTDIR    vytiahne všetky nájdené PEF kontajnery ako .pef
+  pef.py info FILE              sections, imports, exports, TheDriverDescription
+  pef.py scan FILE...           finds PEF containers embedded in any file
+                                (OS X kext binary, ioreg dump, ROM image)
+  pef.py extract FILE OUTDIR    extracts all PEF containers found as .pef
   pef.py setinit FILE INIT [TERM]
-                                CFM init/term rutina = exportovaný tvector (RAVE engine
-                                sa registruje v init ako ATI TtRegister); main = žiadny
-  pef.py fixhash FILE           preusporiada exporty podľa slotov hash tabuľky (MakePEF ich
-                                zapisuje nezoradené → CFM pri >1 slote nenájde symboly)
-  pef.py ioreg FILE OUTDIR      z výstupu `ioreg -l -w0 -x` vytiahne property
-                                "driver,AAPL,MacOS,PowerPC" (hex <...>) ako .pef
+                                CFM init/term routine = exported tvector (the RAVE engine
+                                registers itself in init like ATI TtRegister); main = none
+  pef.py fixhash FILE           reorders exports by hash table slot (MakePEF writes them
+                                unsorted → with >1 slot CFM cannot find symbols)
+  pef.py ioreg FILE OUTDIR      extracts the property
+                                "driver,AAPL,MacOS,PowerPC" (hex <...>) from `ioreg -l -w0 -x` output as .pef
 
-Vystup `extract`/`ioreg` je čistý data fork; typ/creator pre OS 9 nastaví
-tools/mkndrv.sh.
+The output of `extract`/`ioreg` is a bare data fork; tools/mkndrv.sh sets
+the OS 9 type/creator.
 """
 import re
 import struct
@@ -81,7 +81,7 @@ def unpack_pattern(raw, total_len):
                 i += custom
                 out += common
         else:
-            raise ValueError(f"neznámy pattern opcode {op}")
+            raise ValueError(f"unknown pattern opcode {op}")
     if len(out) < total_len:
         out += bytes(total_len - len(out))
     return bytes(out)
@@ -90,7 +90,7 @@ def unpack_pattern(raw, total_len):
 class PEF:
     def __init__(self, data):
         if data[:8] != MAGIC:
-            raise ValueError("nie je PEF")
+            raise ValueError("not a PEF")
         self.data = data
         (_, _, self.arch, self.fmt, self.stamp, self.oldDef, self.oldImp, self.cur,
          nsec, ninst, _) = struct.unpack_from(">4s4s4sIIIIIHHI", data, 0)
@@ -224,7 +224,7 @@ def cmd_scan(paths, outdir=None):
 
 
 def cmd_ioreg(path, outdir):
-    """`ioreg -l -w0 -x -p IODeviceTree` vypíše dáta ako "driver,AAPL,MacOS,PowerPC" = <4a6f7921...>."""
+    """`ioreg -l -w0 -x -p IODeviceTree` prints the data as "driver,AAPL,MacOS,PowerPC" = <4a6f7921...>."""
     text = Path(path).read_text(errors="replace")
     out_dir = Path(outdir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -238,7 +238,7 @@ def cmd_ioreg(path, outdir):
         print(f"{node_name}: {len(blob)} B -> {out}")
         n += 1
     if not n:
-        print("žiadna driver,AAPL,MacOS,PowerPC property (spusti ioreg s -x a -w0)")
+        print("no driver,AAPL,MacOS,PowerPC property (run ioreg with -x and -w0)")
 
 
 def cmd_setinit(path, init, term=None):
@@ -249,7 +249,7 @@ def cmd_setinit(path, init, term=None):
     def find(name):
         e = next((x for x in pef.exports if x["name"] == name), None)
         if not e or e["cls"] != "tvector":
-            raise SystemExit(f"{name}: export (tvector) nenájdený")
+            raise SystemExit(f"{name}: export (tvector) not found")
         return e["section"], e["value"]
 
     hdr = [-1, 0, -1, 0, -1, 0]
@@ -264,7 +264,7 @@ def cmd_setinit(path, init, term=None):
 def pef_hash(name):
     h = 0
     for c in name:
-        h = ((h << 1) - (h >> 16)) ^ c          # SInt32 aritmetika (PseudoRotate)
+        h = ((h << 1) - (h >> 16)) ^ c          # SInt32 arithmetic (PseudoRotate)
         h = (h + (1 << 31)) % (1 << 32) - (1 << 31)
     return (len(name) << 16) | ((h ^ (h >> 16)) & 0xFFFF)
 
@@ -293,7 +293,7 @@ def cmd_fixhash(path):
         struct.pack_into(">I", data, key_off + 4 * j, key)
         data[sym_off + 10 * j:sym_off + 10 * j + 10] = sym
     Path(path).write_bytes(bytes(data))
-    print(f"{path}: {nexp} exportov v {nslots} slotoch zoradenych")
+    print(f"{path}: {nexp} exports sorted into {nslots} slots")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""docs/INSTALL.md → čistý text bez diakritiky a Markdownu (SimpleText v OS 9 nemá
-stredoeurópske kódovanie). Použitie: mkreadme.py INSTALL.md VYSTUP.txt"""
+"""docs/INSTALL.md → plain ASCII text without Markdown (SimpleText on OS 9 has no
+UTF-8). Usage: mkreadme.py INSTALL.md OUTPUT.txt"""
 import re, sys, unicodedata
 
 src, dst = sys.argv[1:3]
@@ -9,7 +9,7 @@ for line in open(src, encoding='utf-8'):
     line = line.rstrip('\n')
     if line.startswith('```'):
         continue
-    if re.match(r'^\|[-| ]+\|$', line):                 # oddeľovač tabuľky
+    if re.match(r'^\|[-| ]+\|$', line):                 # table separator
         continue
     if line.startswith('|'):
         cells = [c.strip() for c in line.strip('|').split('|')]

@@ -1,10 +1,10 @@
 #include "nv34.h"
 
 #ifndef NV_SET_ARB
-#define NV_SET_ARB 0    /* 1 = FIFO arbitráž podľa nouveau nv20_update_arb; 0 = nechať hodnoty z OF (32 bpp už zvládajú) */
+#define NV_SET_ARB 0    /* 1 = FIFO arbitration per nouveau nv20_update_arb; 0 = keep the OF values (already fine for 32 bpp) */
 #endif
 
-/* ---- MMIO prístup ------------------------------------------------------ */
+/* ---- MMIO access ------------------------------------------------------ */
 
 static inline void eieio(void)
 {
@@ -33,9 +33,9 @@ void nv_wr32(NVHw *hw, UInt32 reg, UInt32 val)
     eieio();
 }
 
-/* Poistka pre big-endian režim (PMC_BOOT_1 = 0x01000001): ak by karta prehadzovala bajty
- * aj pri 8-bit prístupoch, VGA port 0x3d4 by bol na 0x3d7 (byteXor = 3). Na PB 6,2 test
- * ozveny vyšiel byteXor = 0 — 8-bit prístupy sú na prirodzených adresách. */
+/* Safeguard for big-endian mode (PMC_BOOT_1 = 0x01000001): if the card swapped bytes
+ * on 8-bit accesses too, VGA port 0x3d4 would sit at 0x3d7 (byteXor = 3). On the PB 6,2 the
+ * echo test gave byteXor = 0 — 8-bit accesses are at their natural addresses. */
 static UInt8 rd8(NVHw *hw, UInt32 reg)
 {
     UInt8 v = hw->mmio[reg ^ hw->byteXor];
@@ -49,7 +49,7 @@ static void wr8(NVHw *hw, UInt32 reg, UInt8 v)
     eieio();
 }
 
-/* CRTC index register je čitateľný: zapíš dve hodnoty a over spätné čítanie. */
+/* The CRTC index register is readable: write two values and check the readback. */
 static int index_echo(NVHw *hw, UInt32 x)
 {
     hw->byteXor = x;
@@ -153,7 +153,7 @@ OSStatus nv_probe(NVHw *hw, int regHead, UInt32 expBpp, UInt32 expPitch)
     UInt32 boot1, chipset;
     int h, best = -1, bestScore = -1;
 
-    /* NV_PMC_BOOT_1 je 0 (LE) alebo 0x01000001 (BE) — symetrické, číta sa rovnako v oboch režimoch. */
+    /* NV_PMC_BOOT_1 is 0 (LE) or 0x01000001 (BE) — symmetric, reads the same in both modes. */
     boot1 = *(volatile UInt32 *)(hw->mmio + NV_PMC_BOOT_1);
     eieio();
     hw->bigEndianRegs = (boot1 == 0x01000001);
@@ -166,9 +166,9 @@ OSStatus nv_probe(NVHw *hw, int regHead, UInt32 expBpp, UInt32 expPitch)
     detect_byte_lanes(hw);
     hw->cr44 = nv_rdcr(hw, 0, CR_OWNER);
 
-    /* Aktívna hlava = tá, ktorej formát a pitch sedia s tým, čo OF/boot ROM zapísali do
-     * `depth`/`linebytes`. PB 6,2: panel ťahá hlava 1 (CR28 0x83, pitch 4096), hlava 0 ostáva
-     * v 8 bpp/1024 z OF promptu — hoci uzol sa volá Display-A a má `reg 0`. */
+    /* Active head = the one whose format and pitch match what OF/boot ROM wrote into
+     * `depth`/`linebytes`. PB 6,2: the panel is driven by head 1 (CR28 0x83, pitch 4096), head 0 stays
+     * at 8 bpp/1024 from the OF prompt — even though the node is called Display-A and has `reg 0`. */
     for (h = 0; h < 2; h++) {
         NVHeadDiag *d = &hw->headDiag[h];
         int score = 0;
@@ -184,7 +184,7 @@ OSStatus nv_probe(NVHw *hw, int regHead, UInt32 expBpp, UInt32 expPitch)
             score += 8;
         if (d->start == hw->fbOffset)
             score += 4;
-        if ((d->fp_tg & (3 << 28)) == (1 << 28))      /* DISPEN_POS = FP timing generátor beží */
+        if ((d->fp_tg & (3 << 28)) == (1 << 28))      /* DISPEN_POS = FP timing generator running */
             score += 2;
         if (h == regHead)
             score += 1;
@@ -199,9 +199,9 @@ OSStatus nv_probe(NVHw *hw, int regHead, UInt32 expBpp, UInt32 expPitch)
     hw->curBpp = nv_current_bpp(hw);
     hw->curPitch = nv_current_pitch(hw);
     hw->pcrtcConfig = rd_head(hw, NV_PCRTC_CONFIG);
-    /* Endianitu nemeníme, ak ju už rieši scanout (PCRTC_CONFIG bit 31, OF na PB 6,2 — aj keď
-     * štartuje v 8 bpp) alebo ak predchodca už zobrazoval direct režim. CR46 swap by inak
-     * pri prechode na 16/32 bpp prehodil bajty druhýkrát. */
+    /* We leave endianness alone if the scanout already handles it (PCRTC_CONFIG bit 31, OF on PB 6,2 — even when
+     * starting in 8 bpp) or if the predecessor already displayed a direct mode. Otherwise the CR46 swap would
+     * swap the bytes a second time when switching to 16/32 bpp. */
     hw->keepEndian = (hw->curBpp > 8) || (hw->pcrtcConfig & 0x80000000);
     hw->scaled = 0;
     return noErr;
@@ -225,7 +225,7 @@ UInt32 nv_current_pitch(NVHw *hw)
     return units << 3;
 }
 
-/* ---- režimy ------------------------------------------------------------ */
+/* ---- modes ------------------------------------------------------------ */
 
 static void set_pitch(NVHw *hw, UInt32 pitch)
 {
@@ -236,8 +236,8 @@ static void set_pitch(NVHw *hw, UInt32 pitch)
     SETCR(CR_42, (CR(CR_42) & ~0x40) | ((units >> 11) & 1) << 6);
 }
 
-/* Veľkosť aktívnej oblasti CRTC. Totals/sync nechávame z OF — CRTC beží ako slave
- * FP timing generátora (CR28 b7), ktorý drží natívne 1024×768 @ 65 MHz. */
+/* Size of the active CRTC area. Totals/sync stay as OF set them — the CRTC runs as a slave
+ * of the FP timing generator (CR28 b7), which holds native 1024×768 @ 65 MHz. */
 static void set_display_size(NVHw *hw, UInt32 width, UInt32 height)
 {
     NVNativeState *n = &hw->nat;
@@ -246,7 +246,7 @@ static void set_display_size(NVHw *hw, UInt32 width, UInt32 height)
     UInt8 vre = CR(CR_VRE);
     UInt8 heb = CR(CR_HEB), ovl = CR(CR_OVL), cell = CR(CR_CELL_HT), lsr = CR(CR_LSR);
 
-    SETCR(CR_VRE, vre & 0x7f);     /* odomkni CR00–CR07 */
+    SETCR(CR_VRE, vre & 0x7f);     /* unlock CR00–CR07 */
 
     SETCR(CR_HDE, hde & 0xff);
     heb = (heb & ~0x02) | ((hde >> 8) & 1) << 1;
@@ -298,19 +298,19 @@ void nv_set_mode(NVHw *hw, UInt32 width, UInt32 height, UInt32 nativeW, UInt32 n
 
     SETCR(CR_LOCK, NV_CR_UNLOCK);
 
-    /* Pixel formát: (depth + 1) / 8 ako v nouveau; zachovaj slave bit pre FP. */
+    /* Pixel format: (depth + 1) / 8 as in nouveau; keep the slave bit for the FP. */
     SETCR(CR_PIXEL, (n->cr_pixel & 0x80) | (bpp == 8 ? 1 : bpp == 16 ? 2 : 3));
 
-    /* Mac "Thousands" je xRGB 1555 → ALT_MODE_SEL (565) vypnuté. 8-bit paleta vždy. */
+    /* Mac "Thousands" is xRGB 1555 → ALT_MODE_SEL (565) off. Always 8-bit palette. */
     gen = (gen & ~GENCTRL_ALT_MODE_SEL) | GENCTRL_BPC_8BITS;
     wr_head(hw, NV_PRAMDAC_GENERAL_CONTROL, gen);
 
     set_pitch(hw, pitch);
     wr_head(hw, NV_PCRTC_START, hw->fbOffset);
 
-    /* Big-endian CPU: LFB apertúra prehadzuje bajty podľa hĺbky (xf86-video-nv).
-     * Ak sme štartovali nad driverom, ktorý už direct režim zobrazoval, jeho
-     * nastavenie endianity (CR46 / PCRTC_CONFIG) necháme tak. */
+    /* Big-endian CPU: the LFB aperture swaps bytes according to depth (xf86-video-nv).
+     * If we started on top of a driver that already displayed a direct mode, we leave its
+     * endianness setting (CR46 / PCRTC_CONFIG) alone. */
     if (!hw->keepEndian)
         nv_wrcr(hw, hw->head, CR_LFB_SWAP, nv_rdcr(hw, hw->head, CR_LFB_SWAP) | 0x80);
     if (!hw->keepEndian && hw->head != 0) {

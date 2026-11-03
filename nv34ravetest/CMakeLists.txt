@@ -1,4 +1,4 @@
-# NV34 RAVE Test — test NV34 RAVE enginu cez RAVE API (Retro68 PPC).
+# NV34 RAVE Test — tests the NV34 RAVE engine through the RAVE API (Retro68 PPC).
 cmake_minimum_required(VERSION 3.10)
 project(NV34RAVETest C CXX)
 add_application(NV34RAVETest main.c)

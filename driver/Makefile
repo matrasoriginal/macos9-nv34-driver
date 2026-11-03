@@ -1,7 +1,7 @@
-# NV34 NDRV — cross-build cez Retro68 (PowerPC PEF).
+# NV34 NDRV — cross-build with Retro68 (PowerPC PEF).
 #
 #   make                  → build/NV34NDRV.pef (data fork) + info
-#   make NV_SCALED_MODES=0  bez škálovaných režimov 800×600 / 640×480
+#   make NV_SCALED_MODES=0  without the scaled modes 800×600 / 640×480
 #
 RETRO68 ?= $(HOME)/Retro68-build/toolchain
 CC      := $(RETRO68)/bin/powerpc-apple-macos-gcc

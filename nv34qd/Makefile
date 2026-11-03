@@ -1,4 +1,4 @@
-# NV34 QD Accel — PPC fragment (nv34qd_install) + 68k INIT stub, zabalené ako 'INIT' súbor.
+# NV34 QD Accel — PPC fragment (nv34qd_install) + 68k INIT stub, packaged as an 'INIT' file.
 RETRO68    ?= $(HOME)/Retro68-build/toolchain
 RETRO68K   ?= $(HOME)/Retro68-build-68k/toolchain
 CC         := $(RETRO68)/bin/powerpc-apple-macos-gcc

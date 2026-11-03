@@ -1,10 +1,10 @@
 /*
- * NV34 NDRV — minimálny Mac OS 9 video driver pre GeForce FX Go5200 (PowerBook 6,2).
+ * NV34 NDRV — minimal Mac OS 9 video driver for the GeForce FX Go5200 (PowerBook 6,2).
  *
- * Režimy pre interný panel: natívne 1024×768 + škálované 800×600, 640×480,
- * každý v 8 / 16 / 32 bpp. Bez 2D akcelerácie, bez hardvérového kurzora.
+ * Modes for the internal panel: native 1024×768 + scaled 800×600, 640×480,
+ * each in 8 / 16 / 32 bpp. No 2D acceleration, no hardware cursor.
  *
- * Štruktúra podľa Apple "Designing PCI Cards and Drivers" a QemuMacDrivers.
+ * Structure per Apple "Designing PCI Cards and Drivers" and QemuMacDrivers.
  */
 #include "ndrv_api.h"
 #include "nv34.h"
@@ -14,9 +14,9 @@
 #define DRV_STAGE   finalStage
 #define DRV_REV     0
 
-/* Cache režim framebuffera pre CPU (0 = nechať systémový default). Na PB 6,2 write-through
- * (2) nemá účinok — OS 9 mapuje AGP priestor necacheovane a čítanie VRAM ostáva ~12 MB/s
- * (NV34 Bench, docs/faza3.md). Ponechané ako experimentálny prepínač. */
+/* CPU cache mode for the framebuffer (0 = keep the system default). On the PB 6,2 write-through
+ * (2) has no effect — OS 9 maps AGP space uncached and VRAM reads stay at ~12 MB/s
+ * (NV34 Bench, docs/phase3.md). Kept as an experimental switch. */
 #ifndef NV_FB_CACHE
 #define NV_FB_CACHE 0
 #endif
@@ -25,7 +25,7 @@
 #define NV_SCALED_MODES 1
 #endif
 
-/* ---- popis drivera (Expansion Manager matchuje driverType proti `compatible`) -- */
+/* ---- driver description (Expansion Manager matches driverType against `compatible`) -- */
 
 DriverDescription TheDriverDescription = {
     kTheDescriptionSignature,
@@ -42,7 +42,7 @@ DriverDescription TheDriverDescription = {
     }
 };
 
-/* ---- režimy ------------------------------------------------------------ */
+/* ---- modes ------------------------------------------------------------ */
 
 typedef struct ModeDef {
     DisplayModeID   id;
@@ -56,10 +56,10 @@ typedef struct ModeDef {
 static ModeDef gModes[MAX_MODES];
 static int gModeCount;
 
-/* ---- stav drivera -------------------------------------------------------- */
+/* ---- driver state -------------------------------------------------------- */
 
 typedef struct GammaBuf {
-    GammaTbl    hdr;            /* gFormulaData[0] je prvý bajt dát (gFormulaSize = 0) */
+    GammaTbl    hdr;            /* gFormulaData[0] is the first data byte (gFormulaSize = 0) */
     UInt8       data[3 * 256];
 } GammaBuf;
 
@@ -79,35 +79,35 @@ static struct {
     InterruptServiceIDType vblService;
     TimerID         timer;
     volatile int    timerRunning;
-    UInt8           clutR[256], clutG[256], clutB[256];    /* logická paleta (pred gamou) */
+    UInt8           clutR[256], clutG[256], clutB[256];    /* logical palette (before gamma) */
     UInt8           gamR[256], gamG[256], gamB[256];
     UInt8           hwR[256], hwG[256], hwB[256];
     GammaBuf        gammaTbl;
     UInt32          fbCacheMode;
 } G;
 
-/* ---- záznam volaní (pre ladenie bootu) ------------------------------------
- * Kruhový buffer mimo G (prežije memset v inite). Adresa ide do diag d[29];
- * NV34 Info ho číta priamo z pamäte (OS 9 má jeden adresný priestor). */
+/* ---- call trace (for debugging boot) ------------------------------------
+ * Ring buffer outside G (survives the memset in init). Its address goes into diag d[29];
+ * NV34 Info reads it directly from memory (OS 9 has a single address space). */
 
 #define TRACE_SIZE 1024
 
 typedef struct TraceEntry {
     UInt32  what;       /* IOCommandCode << 24 | kind << 16 | csCode */
-    UInt32  arg0, arg1; /* prvé dva dwordy záznamu csParam pred volaním */
+    UInt32  arg0, arg1; /* first two dwords of the csParam record before the call */
     UInt32  result;
-    UInt32  state;      /* po volaní: curDepth << 16 | curMode << 8 | HW bpp */
-    UInt32  pitch;      /* po volaní: HW pitch */
+    UInt32  state;      /* after the call: curDepth << 16 | curMode << 8 | HW bpp */
+    UInt32  pitch;      /* after the call: HW pitch */
 } TraceEntry;
 
 static struct {
     UInt32      magic;  /* 'NVTR' */
-    UInt32      count;  /* celkový počet záznamov (index = count % TRACE_SIZE) */
+    UInt32      count;  /* total number of entries (index = count % TRACE_SIZE) */
     UInt32      size;   /* TRACE_SIZE */
     TraceEntry  e[TRACE_SIZE];
 } gTrace;
 
-/* GCC môže pri -O2 generovať volania memset/memcpy. */
+/* GCC may emit calls to memset/memcpy at -O2. */
 void *memset(void *d, int c, unsigned long n)
 {
     UInt8 *p = d;
@@ -156,9 +156,9 @@ static Ptr fb_base(void)
 
 static UInt32 mode_flags(const ModeDef *m)
 {
-    /* hl-6: aj škálované režimy sú kModeSafe — bez neho DrawSprocket pri SetState(Active) vracia
-     * kDSpConfirmSwitchWarning (-30448) a Half-Life (SDL) po prepnutí zamrzol; Quake II / UT
-     * v 640×480 / 800×600 fungujú */
+    /* hl-6: the scaled modes are kModeSafe too — without it DrawSprocket's SetState(Active) returns
+     * kDSpConfirmSwitchWarning (-30448) and Half-Life (SDL) froze after the switch; Quake II / UT
+     * work at 640×480 / 800×600 */
     UInt32 f = (1 << kModeValid) | (1 << kModeShowNow) | (1 << kModeSafe);
     if (m->width == G.nativeW && m->height == G.nativeH)
         f |= (1 << kModeDefault);
@@ -252,7 +252,7 @@ static OSStatus find_parent(const RegEntryID *e, RegEntryID *parent)
     return RegistryCStrEntryLookup(0, path, parent);
 }
 
-/* BAR0 = MMIO (config 0x10), BAR1 = framebuffer apertúra (config 0x14). */
+/* BAR0 = MMIO (config 0x10), BAR1 = framebuffer aperture (config 0x14). */
 static OSStatus map_bars(void)
 {
     RegEntryID parent, *pci = &G.entry;
@@ -286,7 +286,7 @@ static OSStatus map_bars(void)
     if (haveParent)
         RegistryEntryIDDispose(&parent);
 
-    /* Záloha: OF `address` na display uzle = BAR1 + fboffset. */
+    /* Fallback: OF `address` on the display node = BAR1 + fboffset. */
     if (!G.vramLogical) {
         UInt32 addr = get_prop32(&G.entry, "address", 0);
         if (addr)
@@ -297,13 +297,13 @@ static OSStatus map_bars(void)
     return noErr;
 }
 
-/* Fázy initu pre diagnostiku (d[12]); d[13] = chybový kód. */
+/* Init stages for diagnostics (d[12]); d[13] = error code. */
 enum {
     kStageOK            = 0,
     kStageNotBuiltIn    = 1,
     kStageNoBars        = 2,
     kStageNotNV34       = 3,
-    kStageDisabled      = 4     /* boot-args obsahuje nv34off */
+    kStageDisabled      = 4     /* boot-args contains nv34off */
 };
 
 static void publish_diag(UInt32 stage, OSStatus err)
@@ -341,7 +341,7 @@ static void publish_diag(UInt32 stage, OSStatus err)
         RegistryPropertySet(&G.entry, "NV34NDRV,diag", d, sizeof(d));
 }
 
-/* ---- paleta a gama ------------------------------------------------------- */
+/* ---- palette and gamma ------------------------------------------------------- */
 
 static void gamma_linear(void)
 {
@@ -375,7 +375,7 @@ static void load_hw_range(UInt32 start, UInt32 count)
     nv_load_palette(&G.hw, start, count, &G.hwR[start], &G.hwG[start], &G.hwB[start]);
 }
 
-/* Direct režimy: CLUT je per-kanálová gama rampa. */
+/* Direct modes: the CLUT is a per-channel gamma ramp. */
 static void clut_identity(void)
 {
     int i;
@@ -383,7 +383,7 @@ static void clut_identity(void)
         G.clutR[i] = G.clutG[i] = G.clutB[i] = (UInt8)i;
 }
 
-/* ---- prepínanie režimov -------------------------------------------------- */
+/* ---- mode switching -------------------------------------------------- */
 
 static void gray_fill(void)
 {
@@ -398,7 +398,7 @@ static void gray_fill(void)
         volatile UInt32 *p = (volatile UInt32 *)row;
         UInt32 pat;
         if (bpp == 8)
-            pat = (y & 1) ? 0xFF00FF00 : 0x00FF00FF;    /* 0 = biela, 255 = čierna */
+            pat = (y & 1) ? 0xFF00FF00 : 0x00FF00FF;    /* 0 = white, 255 = black */
         else if (bpp == 16)
             pat = 0x42104210;
         else
@@ -408,9 +408,9 @@ static void gray_fill(void)
     }
 }
 
-/* hl-4: pred zmenou režimu počkať, kým GPU dokončí push buffer (kanál 0 QD Accel) a PGRAPH je
- * nečinný. Half-Life prepína na celú obrazovku počas 3D (až 512 KB príkazov v rade) → Mac stál;
- * Quake II pred prepnutím ruší kontext (GPU už nečinné) a funguje. Max. 250 ms. */
+/* hl-4: before a mode change wait until the GPU finishes the push buffer (QD Accel channel 0) and PGRAPH is
+ * idle. Half-Life switches to full screen in the middle of 3D (up to 512 KB of queued commands) → the Mac hung;
+ * Quake II tears down its context before switching (GPU already idle) and works. Max. 250 ms. */
 static void wait_gpu_idle(void)
 {
     AbsoluteTime end = AddDurationToAbsolute(250 * durationMillisecond, UpTime());
@@ -448,7 +448,7 @@ static OSStatus set_mode(DisplayModeID id, DepthMode depth)
     return noErr;
 }
 
-/* ---- VBL (časovač 60 Hz, ako QemuVGA) ------------------------------------ */
+/* ---- VBL (60 Hz timer, like QemuVGA) ------------------------------------ */
 
 static OSStatus vbl_tick(void *p1, void *p2);
 
@@ -490,7 +490,7 @@ static OSStatus do_set_entries(VDSetEntryRecord *e, int direct)
         if (G.grayMode && !direct)
             r = g = b = (r * 30 + g * 59 + b * 11) / 100;
         if (direct && depth_bpp(G.curDepth) == 16) {
-            /* 5-bit kanály: položka i pokrýva HW indexy i*8 .. i*8+7 */
+            /* 5-bit channels: entry i covers HW indices i*8 .. i*8+7 */
             UInt32 j;
             if (idx >= 32)
                 return controlErr;
@@ -648,7 +648,7 @@ static OSStatus driver_status(SInt16 code, void *param)
         c->csDisplayType = kPanelTFTConnect;
         c->csConnectTaggedType = 0;
         c->csConnectTaggedData = 0;
-        /* bez kAllModesSafe: škálované režimy majú ísť cez potvrdenie */
+        /* no kAllModesSafe: the scaled modes should go through confirmation */
         c->csConnectFlags = (1 << kAllModesValid) | (1 << kHasDirectConnection) | (1 << kBuiltInConnection);
         c->csDisplayComponent = 0;
         return noErr;
@@ -729,10 +729,10 @@ static OSStatus driver_status(SInt16 code, void *param)
     }
 }
 
-/* ---- životný cyklus ------------------------------------------------------ */
+/* ---- life cycle ------------------------------------------------------ */
 
-/* Núdzový vypínač: v Open Firmware `setenv boot-args nv34off` → driver sa nenaviaže
- * (Extensions Off/Shift načítanie ndrv z Extensions nezastaví). */
+/* Kill switch: in Open Firmware `setenv boot-args nv34off` → the driver does not bind
+ * (Extensions Off/Shift does not stop the ndrv from loading out of Extensions). */
 static int disabled_by_boot_args(void)
 {
     RegEntryID opt;
@@ -768,7 +768,7 @@ static OSStatus driver_initialize(DriverInitInfo *info)
         return paramErr;
     }
 
-    /* Iba interný panel; Display-B (mini-DVI) ostáva pôvodnému driveru. */
+    /* Internal panel only; Display-B (mini-DVI) stays with the original driver. */
     if (!has_prop(&G.entry, "built-in")) {
         publish_diag(kStageNotBuiltIn, paramErr);
         return paramErr;
@@ -793,7 +793,7 @@ static OSStatus driver_initialize(DriverInitInfo *info)
         return err;
     }
 
-    /* Začíname v režime, ktorý už beží (OF alebo predchodca) — init do HW nezapisuje. */
+    /* Start in the mode that is already running (OF or predecessor) — init writes nothing to HW. */
     bpp = G.hw.curBpp;
     G.hw.fbOffset = G.hw.nat.start;
     build_modes();
@@ -863,9 +863,9 @@ static OSStatus driver_finalize(void)
     return noErr;
 }
 
-/* Argumenty len pre csCode, ktoré driver sám obsluhuje a ktoré nesú pointer na záznam.
- * Iné volania (Power Manager, súkromné kódy) môžu mať v csParam hodnotu, nie adresu —
- * čítanie z nej pri štarte = výnimka a zaseknutie (4.0.1). */
+/* Arguments only for csCodes the driver handles itself and that carry a pointer to a record.
+ * Other calls (Power Manager, private codes) may hold a value in csParam, not an address —
+ * reading from it at boot = exception and hang (4.0.1). */
 static int trace_has_record(IOCommandCode code, SInt16 cs)
 {
     if (code == kControlCommand)

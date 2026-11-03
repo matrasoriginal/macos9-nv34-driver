@@ -1,4 +1,4 @@
-/* NV34 QD Accel — 'INIT' súbor: 68k stub + PPC fragment v resource 'nvqd'. */
+/* NV34 QD Accel — 'INIT' file: 68k stub + PPC fragment in resource 'nvqd'. */
 #include "Retro68.r"
 #include "MacTypes.r"
 
@@ -17,5 +17,5 @@ data 'nvqd' (128, sysheap, locked) {
 resource 'vers' (1) {
 	0x01, 0x90, release, 0x00, 0,
 	"1.9",
-	"1.9, NV34 QD Accel — GPU CopyBits pre GeForce FX Go5200"
+	"1.9, NV34 QD Accel — GPU CopyBits for GeForce FX Go5200"
 };

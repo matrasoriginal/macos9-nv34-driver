@@ -1,4 +1,4 @@
-# NV34 RAVE — QuickDraw 3D RAVE drawing engine ('shlb' / 'tnsl' do Extensions).
+# NV34 RAVE — QuickDraw 3D RAVE drawing engine ('shlb' / 'tnsl', goes in Extensions).
 RETRO68    ?= $(HOME)/Retro68-build/toolchain
 CC         := $(RETRO68)/bin/powerpc-apple-macos-gcc
 MAKEPEF    := $(RETRO68)/bin/MakePEF

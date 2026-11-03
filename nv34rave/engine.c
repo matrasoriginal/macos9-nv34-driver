@@ -1,18 +1,18 @@
 /*
- * NV34 RAVE — QuickDraw 3D RAVE 1.6 drawing engine pre GeForce FX Go5200 (NV34).
+ * NV34 RAVE — QuickDraw 3D RAVE 1.6 drawing engine for the GeForce FX Go5200 (NV34).
  *
- * Zdieľaná knižnica (typ 'shlb', creator 'tnsl' ako ATI enginy) v Extensions. RAVE manager ju
- * načíta a CFM init rutina TtRegister zaregistruje engine (QARegisterEngine).
- * GPU vlastní NV34 QD Accel (INIT): engine si od neho cez Name Registry property
- * "NV34ACCEL,shared" vezme push buffer, 3D stav, alokátor VRAM a log (accel/nv34_shared.h).
+ * A shared library (type 'shlb', creator 'tnsl' like the ATI engines) in Extensions. The RAVE manager
+ * loads it and the CFM init routine TtRegister registers the engine (QARegisterEngine).
+ * The GPU is owned by NV34 QD Accel (the INIT): via the Name Registry property
+ * "NV34ACCEL,shared" the engine takes the push buffer, 3D state, VRAM allocator and log from it (accel/nv34_shared.h).
  *
- * Kreslenie: fixed-function vrcholy v pixeloch (matice identita), farba cez register combiners,
- * textúry cez fragment program TXPH s projektívnou súradnicou (u/w, v/w, 0, 1/w) — perspektívne
- * správne. Kontext s DoubleBuffer kreslí do zadného buffra vo VRAM pod viditeľnou plochou
- * (rovnaký pitch ako obrazovka), RenderEnd ho skopíruje 2D blitom cez klip región.
+ * Drawing: fixed-function vertices in pixels (identity matrices), color through register combiners,
+ * textures through the fragment program TXPH with a projective coordinate (u/w, v/w, 0, 1/w) — perspective
+ * correct. A DoubleBuffer context draws into a back buffer in VRAM below the visible area
+ * (same pitch as the screen), RenderEnd copies it with a 2D blit through the clip region.
  *
- * Etapa R1: Gouraud + textúry (ARGB32/RGB32/ARGB16/RGB16/CL8 → A8R8G8B8 swizzled, mipmapy),
- * z-buffer, blending, bitmapy, body/čiary, trimesh, notice metódy, log neznámych tagov.
+ * Stage R1: Gouraud + textures (ARGB32/RGB32/ARGB16/RGB16/CL8 → A8R8G8B8 swizzled, mipmaps),
+ * z-buffer, blending, bitmaps, points/lines, trimesh, notice methods, log of unknown tags.
  */
 #include <Quickdraw.h>
 #include <MacMemory.h>
@@ -34,7 +34,7 @@ extern OSStatus RegistryEntryIDDispose(RegEntryID *id);
 #define ENGINE_ID       1
 #define REVISION        1
 
-/* metódy NV30_3D (nv30-40_3d.xml.h, MIT) */
+/* NV30_3D methods (nv30-40_3d.xml.h, MIT) */
 #define SUBC                7
 #define M_RT_HORIZ          0x0200
 #define M_RT_ENABLE         0x0220
@@ -69,12 +69,12 @@ extern OSStatus RegistryEntryIDDispose(RegEntryID *id);
 #define PRIM_TRI_STRIP  6
 #define PRIM_TRI_FAN    7
 
-/* fragment program TXPH H0, a[tex0], t[0]; END (xf86-video-nouveau), kódovanie pre BE objekt */
+/* fragment program TXPH H0, a[tex0], t[0]; END (xf86-video-nouveau), encoded for the BE object */
 static const NVU32 kFpTex[4] = { 0x18009e81, 0x1c9dc801, 0x0001c800, 0x3fe1c800 };
 
 static const float kOne = 1.0f;
 
-/* ---- bez libc ------------------------------------------------------------ */
+/* ---- no libc ------------------------------------------------------------ */
 
 void *memset(void *d, int c, unsigned long n)
 {
@@ -84,7 +84,7 @@ void *memset(void *d, int c, unsigned long n)
     return d;
 }
 
-/* opt-4: po slovách, ak sú zarovnané (kompilátor ním kopíruje štruktúry) */
+/* opt-4: word by word if aligned (the compiler copies structs with it) */
 void *memcpy(void *d, const void *s, unsigned long n)
 {
     unsigned char *p = d;
@@ -128,13 +128,13 @@ static NVU32 ubyte(float f)
     return (NVU32)(f * 255.0f + 0.5f);
 }
 
-/* ---- zdieľaný stav a log ---------------------------------------------------- */
+/* ---- shared state and log ---------------------------------------------------- */
 
 static NV34Shared *S;
-static int gZ16;                    /* boot-args nv34z16: zeta Z16 pri 16 bpp (ako rave-15) */
-static int gSpoofATI;               /* hlásiť vendor ATI (UT, alebo boot-args nv34raveati) */
-static int gAtiGL;                  /* gl-q2: navyše ATI gestalty a BoundToDevice pre Apple GL (Quake) */
-static int gNo2x;                   /* boot-args nv34no2x: tag 1020 ignorovať */
+static int gZ16;                    /* boot-args nv34z16: Z16 zeta at 16 bpp (like rave-15) */
+static int gSpoofATI;               /* report vendor ATI (UT, or boot-args nv34raveati) */
+static int gAtiGL;                  /* gl-q2: additionally ATI gestalts and BoundToDevice for Apple GL (Quake) */
+static int gNo2x;                   /* boot-args nv34no2x: ignore tag 1020 */
 
 static NV34Shared *shared(void)
 {
@@ -181,8 +181,8 @@ static void fmt_num(char **o, NVU32 v, int base, int width, int neg)
         *(*o)++ = tmp[--n];
 }
 
-/* gl-q2-5: pri ATI procese aj priebežne do súboru (Systémová zložka:Preferences:NV34 RAVE live.txt),
- * aby log prežil zamrznutie a reštart. Každý riadok: otvoriť, pripísať, zavrieť, FlushVol. */
+/* gl-q2-5: for an ATI process also continuously to a file (System Folder:Preferences:NV34 RAVE live.txt),
+ * so that the log survives a freeze and restart. Every line: open, append, close, FlushVol. */
 static int gFileLog, gFileLines, gFileFresh = 1;
 
 static void file_put(const char *s, long n)
@@ -202,7 +202,7 @@ static void file_put(const char *s, long n)
         FSpCreate(&spec, 'ttxt', 'TEXT', 0);
     if (FSpOpenDF(&spec, fsRdWrPerm, &ref) != noErr)
         return;
-    if (gFileFresh) {                               /* minigl-11: každý proces začína prázdnym logom */
+    if (gFileFresh) {                               /* minigl-11: every process starts with an empty log */
         SetEOF(ref, 0);
         gFileFresh = 0;
     }
@@ -214,10 +214,10 @@ static void file_put(const char *s, long n)
 
 static void lg(const char *fmt, ...);
 static int gCallLogs;
-/* priebeh volaní v ATI procese (prvých 600), na hľadanie zamrznutia */
+/* call progress in an ATI process (first 600), to locate freezes */
 #define CL(...) do { if (gFileLog && gCallLogs < 600) { gCallLogs++; lg(__VA_ARGS__); } } while (0)
 
-/* %s %d %u %x %c, šírka (napr. %08x), %f = float s 3 desatinnými miestami */
+/* %s %d %u %x %c, width (e.g. %08x), %f = float with 3 decimal places */
 static void lg(const char *fmt, ...)
 {
     char buf[256], *o = buf, *end = buf + sizeof(buf) - 24;
@@ -278,7 +278,7 @@ static void lg(const char *fmt, ...)
     file_put(buf, o - buf);
 }
 
-/* prvý výskyt každého neznámeho tagu / gestaltu (aby log nezahltil) */
+/* first occurrence of every unknown tag / gestalt (so the log does not get flooded) */
 #define SEEN_MAX 256
 static NVU32 gSeen[SEEN_MAX];
 static int gSeenCount;
@@ -321,7 +321,7 @@ static int gpu_sync(void)
     return nva_sync(S->a, 120) == kNVAOK;
 }
 
-/* ---- objekty enginu ------------------------------------------------------- */
+/* ---- engine objects ------------------------------------------------------- */
 
 #define STATE_MAX 160
 
@@ -329,18 +329,18 @@ struct TQATexture {
     NVU32   magic;                  /* 'NVtx' */
     NVU32   off, size;              /* VRAM */
     NVU32   w, h, log2w, log2h, levels;
-    NVU32   rect;                   /* 1 = lineárna RECT (bitmapa), pitch */
-    NVU32   fmt, bpp;               /* NV formát (0x06 A8R8G8B8, 0x02 A1R5G5B5, 0x04 A4R4G4B4), bajty/texel */
+    NVU32   rect;                   /* 1 = linear RECT (bitmap), pitch */
+    NVU32   fmt, bpp;               /* NV format (0x06 A8R8G8B8, 0x02 A1R5G5B5, 0x04 A4R4G4B4), bytes/texel */
     NVU32   pitch;
     long    pixelType;
     unsigned long flags;
     TQAColorTable *clut;
-    TQAImage src[12];               /* pre CL4/CL8: zdroj na nové nahratie po bind CLUT */
-    /* rave-5: UT minul VRAM → kópia v RAM (už v NV formáte), VRAM len pre používané (LRU) */
+    TQAImage src[12];               /* for CL4/CL8: source for re-uploading after a CLUT bind */
+    /* rave-5: UT ran out of VRAM → copy in RAM (already in NV format), VRAM only for textures in use (LRU) */
     void   *sys;
     NVU32   lastUse;
-    NVU32   alpha0;                 /* % texelov úrovne 0 s alfou 0 (diagnostika) */
-    NVU32   alt;                    /* druhá oblasť VRAM pre často menené textúry (ATI[2]) */
+    NVU32   alpha0;                 /* % of level 0 texels with alpha 0 (diagnostics) */
+    NVU32   alt;                    /* second VRAM area for frequently changed textures (ATI[2]) */
     struct TQATexture *next, *prev;
 };
 
@@ -357,24 +357,24 @@ typedef struct Ctx {
     NVU32   id;
     unsigned long flags;
     GDHandle gd;
-    TQARect rect;                   /* zariadenie (globálne súradnice obrazovky) */
+    TQARect rect;                   /* device (global screen coordinates) */
     RgnHandle clip;
     long    width, height;
     int     dbl, hasZ;
-    NVU32   backOff, backPitch;     /* zadný buffer: offset vo VRAM, pitch = šírka kontextu */
-    int     bpp;                    /* 16 (X1R5G5B5) alebo 32 (A8R8G8B8) */
-    int     z24;                    /* zeta Z24S8 (aj pri 16 bpp zadnom buffri, rave-16) */
+    NVU32   backOff, backPitch;     /* back buffer: offset in VRAM, pitch = context width */
+    int     bpp;                    /* 16 (X1R5G5B5) or 32 (A8R8G8B8) */
+    int     z24;                    /* Z24S8 zeta (even with a 16 bpp back buffer, rave-16) */
     NVU32   zOff, zPitch;
-    NVU32   fbOff, pitch;           /* obrazovka pri poslednom bind */
+    NVU32   fbOff, pitch;           /* screen at the last bind */
     NVU32   generation;
     unsigned long si[STATE_MAX];
     float   sf[STATE_MAX];
     TQATexture *tex;
-    /* platný stav v GPU (-1 = neznámy) */
+    /* valid state in the GPU (-1 = unknown) */
     long    hwMode, hwBlend, hwZ, hwTex, hwFilter, hwWrap, hwFmt;
-    int     flat2D;                 /* práve kreslený primitív je 2D (z = 0, invW = 1) */
-    int     atiZWrite;              /* súkromný ATI tag 1022: zápis hĺbky (UT: 0 pre oblohu, text) */
-    int     ati2x;                  /* súkromný ATI tag 1020: modulácia 2× (UT nastaví 1) */
+    int     flat2D;                 /* the primitive being drawn is 2D (z = 0, invW = 1) */
+    int     atiZWrite;              /* private ATI tag 1022: depth write (UT: 0 for the sky, text) */
+    int     ati2x;                  /* private ATI tag 1020: 2× modulation (UT sets 1) */
     NVU32   hwEpoch;
     /* trimesh */
     const TQAVGouraud *vg;
@@ -383,13 +383,13 @@ typedef struct Ctx {
     unsigned long nvt;
     TQANoticeMethod notice[5];
     void   *noticeRef[5];
-    /* štatistika */
+    /* statistics */
     NVU32   tris, frames;
 } Ctx;
 
 #define CTX(dc) ((Ctx *)(dc)->drawPrivate)
 
-/* ---- väzba kontextu na GPU ---------------------------------------------------- */
+/* ---- binding a context to the GPU ---------------------------------------------------- */
 
 static void screen_geom(Ctx *c)
 {
@@ -403,7 +403,7 @@ static void invalidate(Ctx *c)
     c->hwMode = c->hwBlend = c->hwZ = c->hwTex = c->hwFilter = c->hwWrap = c->hwFmt = -1;
 }
 
-/* Render target + viewport pre kontext; volať pred každým kreslením. */
+/* Render target + viewport for a context; call before every draw. */
 static int bind(Ctx *c)
 {
     NVU32 w, h, off, zoff, zpitch, cpitch, tx, ty;
@@ -427,20 +427,20 @@ static int bind(Ctx *c)
         tx = c->rect.left - pm->bounds.left;
         ty = c->rect.top - pm->bounds.top;
     }
-    zoff = c->hasZ ? c->zOff : off;                 /* bez z: zeta sa nepoužije */
+    zoff = c->hasZ ? c->zOff : off;                 /* without z: zeta is unused */
     zpitch = c->hasZ ? c->zPitch : c->pitch;
     cpitch = c->dbl ? c->backPitch : c->pitch;
 
     fresh = S->generation != c->generation;
-    if (fresh) {                                    /* nový 3D init alebo nový kontext: FP znova */
+    if (fresh) {                                    /* new 3D init or new context: FP again */
         nv3d_upload_fp(S->g, kFpTex, 4, 1);
         c->generation = S->generation;
     }
     begin(M_RT_HORIZ, 5);
     data(w << 16);
     data(h << 16);
-    /* rave-2: farba aj zeta musia mať rovnaký pitch (iný pitch farby → rozsekané riadky) */
-    data((c->bpp == 16 ? 0x102 : 0x108) | (c->z24 ? 0x40 : 0x20));   /* farba | Z24S8/Z16 | linear */
+    /* rave-2: color and zeta must have the same pitch (a different color pitch → chopped rows) */
+    data((c->bpp == 16 ? 0x102 : 0x108) | (c->z24 ? 0x40 : 0x20));   /* color | Z24S8/Z16 | linear */
     data((zpitch << 16) | cpitch);
     data(off);
     begin(0x0214, 1);                               /* ZETA_OFFSET */
@@ -451,7 +451,7 @@ static int bind(Ctx *c)
     begin(M_VIEWPORT_CLIP_H, 2);
     data((w - 1) << 16);
     data((h - 1) << 16);
-    begin(M_SCISSOR_HORIZ, 2);                      /* kontext (pri kreslení na obrazovku) */
+    begin(M_SCISSOR_HORIZ, 2);                      /* context (when drawing to the screen) */
     data((c->width << 16) | tx);
     data((c->height << 16) | ty);
     begin(M_VIEWPORT_TRANSLATE_X, 8);
@@ -461,7 +461,7 @@ static int bind(Ctx *c)
     dataf(0.0f);
     dataf(1.0f);
     dataf(1.0f);
-    dataf(1.0f);                                    /* hĺbka 0..1 → hardvér (gl-7) */
+    dataf(1.0f);                                    /* depth 0..1 → hardware (gl-7) */
     dataf(0.0f);
     begin(M_FP_ACTIVE_PROGRAM, 1);
     data(S->g->fpOffset | 1);
@@ -475,12 +475,12 @@ static int bind(Ctx *c)
     data(0);
     begin(M_COLOR_MASK, 1);
     data(0x01010101);
-    begin(0x1d78, 1);                               /* DEPTH_CONTROL: clamp namiesto orezania */
+    begin(0x1d78, 1);                               /* DEPTH_CONTROL: clamp instead of clipping */
     data(0x00000010);
     begin(0x0300, 1);                               /* DITHER_ENABLE */
     data(c->bpp == 16 && !(c->flags & kQAContext_NoDither));
     if (fresh && c->hasZ) {
-        /* gl-7, gl-8, rave-3: prvý CLEAR hĺbky po inite/novom RT nezaberie → naprázdno */
+        /* gl-7, gl-8, rave-3: the first depth CLEAR after init/new RT does not take → a dummy one */
         begin(0x0a70, 1);
         data(1);
         begin(M_CLEAR_DEPTH_VALUE, 1);
@@ -493,13 +493,13 @@ static int bind(Ctx *c)
     return 1;
 }
 
-/* ---- stav kreslenia ----------------------------------------------------------- */
+/* ---- drawing state ----------------------------------------------------------- */
 
 enum { MODE_GOURAUD = 0, MODE_TEXTURE = 1 };
 
 static NVU32 gl_blend(unsigned long v)
 {
-    /* RAVE kQAGL_ hodnoty = GL enumy (GL_ZERO 0, GL_ONE 1, 0x300…) */
+    /* RAVE kQAGL_ values = GL enums (GL_ZERO 0, GL_ONE 1, 0x300…) */
     return v;
 }
 
@@ -511,13 +511,13 @@ static void set_mode(Ctx *c, long mode)
         begin(M_TEX_UNITS_ENABLE, 1);
         data(0);
         begin(M_RC_FINAL0, 3);
-        data(0x00000004);                           /* D = primárna farba */
-        data(0x00001400);                           /* G = primárna alfa */
+        data(0x00000004);                           /* D = primary color */
+        data(0x00001400);                           /* G = primary alpha */
         data(0x01000101);
     } else {
         begin(M_TEX_UNITS_ENABLE, 1);
         data(1);
-        /* stupeň 0: tex0 (H0, zdroj 0x08) × primárna farba → spare0 */
+        /* stage 0: tex0 (H0, source 0x08) × primary color → spare0 */
         begin(M_RC_IN_ALPHA0, 6);
         data((0x18u << 24) | (0x14u << 16));
         data((0x08u << 24) | (0x04u << 16));
@@ -542,8 +542,8 @@ static void set_blend(Ctx *c)
     if (b == kQABlend_OpenGL) {
         src = gl_blend(c->si[kQATagGL_BlendSrc]);
         dst = gl_blend(c->si[kQATagGL_BlendDst]);
-        /* rave-22: UT (ATI tag 1020 = 1) svetelné mapy a „modulated“ povrchy sú v polovičnom jase,
-         * DST_COLOR × ZERO má byť 2× (ako OpenGLDrv: DST_COLOR × SRC_COLOR) — inak tmavé steny */
+        /* rave-22: UT (ATI tag 1020 = 1) lightmaps and "modulated" surfaces are at half brightness,
+         * DST_COLOR × ZERO should be 2× (like OpenGLDrv: DST_COLOR × SRC_COLOR) — otherwise dark walls */
         if (c->ati2x && src == 0x0306 && dst == 0)
             dst = 0x0300;
     } else if (b == kQABlend_Interpolate) {
@@ -558,12 +558,12 @@ static void set_blend(Ctx *c)
         return;
     if (first_time(0xF0000000 | (NVU32)key))
         lg("blend %d: src %x dst %x", b, src, dst);
-    /* rave-8: plne priehľadné texely (maskované textúry UT, alfa 0) nesmú zapísať hĺbku — inak
-     * 2D panel menu s priehľadným oknom zakryje model hráča v z-bufferi. ATI zrejme tieto
-     * pixely zahadzuje; pri RAVE miešaní (nie OpenGL) je to bez vplyvu na farbu. */
+    /* rave-8: fully transparent texels (UT masked textures, alpha 0) must not write depth — otherwise
+     * a 2D menu panel with a transparent window hides the player model in the z-buffer. ATI apparently
+     * discards these pixels; with RAVE blending (not OpenGL) this has no effect on color. */
     begin(M_ALPHA_FUNC_ENABLE, 3);
-    /* rave-21: aj OpenGL miešanie so SRC_ALPHA (UT maskované textúry: mreže, rastliny) —
-     * inak diery zapíšu hĺbku a svetelná mapa (ZFunction EQ) ich stmaví / zakryje, čo je za nimi */
+    /* rave-21: also OpenGL blending with SRC_ALPHA (UT masked textures: grates, plants) —
+     * otherwise the holes write depth and the lightmap (ZFunction EQ) darkens / hides what is behind them */
     data(b != kQABlend_OpenGL || src == 0x0302);
     data(0x0204);                                   /* GREATER */
     data(0);
@@ -593,8 +593,8 @@ static void set_depth(Ctx *c)
     if (zf > kQAZFunction_False)
         zf = kQAZFunction_LT;
     test = zf != kQAZFunction_None;
-    /* rave-11: 2D prvky UT (z = 0, invW = 1: pozadie menu, HUD) hĺbku nezapisujú — inak pozadie
-     * menu zakryje model hráča (UT medzi nimi z-buffer nemaže) */
+    /* rave-11: UT 2D elements (z = 0, invW = 1: menu background, HUD) do not write depth — otherwise the menu
+     * background hides the player model (UT does not clear the z-buffer between them) */
     write = test && !c->si[kQATag_ZBufferMask] && !c->flat2D && c->atiZWrite;
     key = (long)((zf << 8) | (write << 1) | test);
     if (c->hwZ == key)
@@ -668,7 +668,7 @@ static int prepare(Ctx *c, long mode)
 {
     if (!bind(c))
         return 0;
-    set_vtxfmt(c, mode == MODE_TEXTURE);           /* podľa typu vrcholov, nie podľa combinerov */
+    set_vtxfmt(c, mode == MODE_TEXTURE);           /* by vertex type, not by combiners */
     if (mode == MODE_TEXTURE && (!c->tex || !set_texture(c, c->tex)))
         mode = MODE_GOURAUD;
     set_mode(c, mode);
@@ -677,20 +677,20 @@ static int prepare(Ctx *c, long mode)
     return 1;
 }
 
-/* ---- vrcholy ------------------------------------------------------------------ */
+/* ---- vertices ------------------------------------------------------------------ */
 
-/* rave-7: UT má z = 1 − 1/w, vzdialené vrcholy z ≥ 1 → hardvér ich orezal (model hráča v menu).
- * Hĺbka sa obmedzí na [0, 1) aj v hardvéri (DEPTH_CONTROL clamp). */
+/* rave-7: UT has z = 1 − 1/w, far vertices z ≥ 1 → the hardware clipped them (player model in the menu).
+ * Depth is clamped to [0, 1) in hardware too (DEPTH_CONTROL clamp). */
 static float zclamp(float z)
 {
-    /* rave-16: horná hranica len v hardvéri (DEPTH_CONTROL clamp) — softvérové 0,99998 zlialo
-     * vzdialené hĺbky UT do jednej hodnoty */
+    /* rave-16: upper bound only in hardware (DEPTH_CONTROL clamp) — a software 0.99998 merged
+     * UT's far depths into a single value */
     return z > 0.0f ? z : 0.0f;
 }
 
-/* rave-23: vrcholy ako inline pole (VERTEX_DATA, non-increment) — jedna hlavička na dávku
- * namiesto 2–3 hlavičiek na vrchol. Poradie atribútov podľa indexu: pozícia (0), farba (3),
- * textúra (8). boot-args nv34immediate = pôvodné VTX_ATTR metódy. */
+/* rave-23: vertices as an inline array (VERTEX_DATA, non-increment) — one header per batch
+ * instead of 2–3 headers per vertex. Attribute order by index: position (0), color (3),
+ * texture (8). boot-args nv34immediate = the original VTX_ATTR methods. */
 static int gImmediate;
 static NVU32 gVwLeft, gVwHdr, gVwWords;
 
@@ -756,15 +756,15 @@ static NVU32 gVtxCount, gVtxLogs;
 
 static void vtx_t(Ctx *c, const TQAVTexture *v)
 {
-    if (0 && (++gVtxCount & 4095) == 1 && gVtxLogs < 16) {     /* vzorky vrcholov (rave-7), vypnuté */
+    if (0 && (++gVtxCount & 4095) == 1 && gVtxLogs < 16) {     /* vertex samples (rave-7), disabled */
         gVtxLogs++;
-        lg("vrchol: x %f y %f z %f invW %f u/w %f v/w %f a %f zf %u pz %u", (double)v->x, (double)v->y,
+        lg("vertex: x %f y %f z %f invW %f u/w %f v/w %f a %f zf %u pz %u", (double)v->x, (double)v->y,
            (double)v->z, (double)v->invW, (double)v->uOverW, (double)v->vOverW, (double)v->a,
            c->si[kQATag_ZFunction], c->si[kQATag_PerspectiveZ]);
     }
     unsigned long op = c->si[kQATag_TextureOp];
     if (op & ~kQATextureOp_Modulate && first_time(0xF1000000 | op))
-        lg("textureOp %x (Highlight/Decal zatial nie)", op);
+        lg("textureOp %x (Highlight/Decal not yet)", op);
     if (!gImmediate) {
         vw_next();
         dataf(v->x);
@@ -798,7 +798,7 @@ static void vtx_t(Ctx *c, const TQAVTexture *v)
         dataf(kOne);
     }
     dataf(v->a);
-    begin(M_VTX_ATTR_4F(8), 4);                     /* projektívna súradnica: TXP delí q */
+    begin(M_VTX_ATTR_4F(8), 4);                     /* projective coordinate: TXP divides by q */
     dataf(v->uOverW);
     dataf(v->vOverW);
     dataf(0.0f);
@@ -834,16 +834,16 @@ static NVU32 vmode_prim(long mode)
     }
 }
 
-/* ---- metódy draw contextu --------------------------------------------------- */
+/* ---- draw context methods --------------------------------------------------- */
 
-/* rave-10: záznam jednej snímky na požiadanie — pri zapnutom Caps Lock sa pri najbližšom
- * RenderStart zapíše celá snímka (max. 300 riadkov), raz za beh aplikácie. */
+/* rave-10: recording one frame on request — with Caps Lock on, the next
+ * RenderStart writes the whole frame (max. 300 lines), once per application run. */
 static int gTrace, gTraceDone, gTraceLines, gCapsWas;
-static int gTraceOn;                /* boot-args nv34trace: záznam snímky cez Caps Lock */
+static int gTraceOn;                /* boot-args nv34trace: frame recording via Caps Lock */
 
 #define TR(...) do { if (gTrace && gTraceLines < 250) { gTraceLines++; lg(__VA_ARGS__); } } while (0)
 
-/* rave-13: zhrnutie — rovnaké po sebe idúce kreslenia (rovnaký stav) sa spočítajú */
+/* rave-13: summary — identical consecutive draws (same state) are counted together */
 static NVU32 gTrSig[8], gTrRun;
 
 static void tr_flush(void)
@@ -880,11 +880,11 @@ static void tr_draw(const char *what, const Ctx *c, unsigned long n, float x, fl
         gTrSig[i] = sig[i];
     gTrRun = 1;
     if (t && t->magic == 'NVtx')
-        TR("%s%u t%x(typ %d %ux%u a0 %u%%) zf%u bl%u %x op%u 2d%u zw%u | %d,%d z%f w%f a%f", what, n, (NVU32)t,
+        TR("%s%u t%x(type %d %ux%u a0 %u%%) zf%u bl%u %x op%u 2d%u zw%u | %d,%d z%f w%f a%f", what, n, (NVU32)t,
            t->pixelType, t->w, t->h, t->alpha0, sig[2], sig[3], sig[4], sig[5], sig[6], c->atiZWrite,
            (long)x, (long)y, (double)z, (double)w, (double)a);
     else
-        TR("%s%u bez tex zf%u bl%u %x 2d%u | %d,%d z%f a%f", what, n, sig[2], sig[3], sig[4], sig[6],
+        TR("%s%u no tex zf%u bl%u %x 2d%u | %d,%d z%f a%f", what, n, sig[2], sig[3], sig[4], sig[6],
            (long)x, (long)y, (double)z, (double)a);
 }
 
@@ -916,7 +916,7 @@ static void SetFloat(TQADrawContext *dc, long tag, float v)
         return;
     }
     if (first_time(0x10000000 | tag))
-        lg("setFloat %d = %f (neznamy)", tag, (double)v);
+        lg("setFloat %d = %f (unknown)", tag, (double)v);
 }
 
 static void SetInt(TQADrawContext *dc, long tag, unsigned long v)
@@ -933,21 +933,21 @@ static void SetInt(TQADrawContext *dc, long tag, unsigned long v)
         if (tag == kQATagGL_LinePattern || tag == kQATag_FogMode || tag == kQATag_AlphaTestFunc ||
             tag == kQATag_ChannelMask || tag == kQATag_MultiTextureEnable) {
             if (v && first_time(0x20000000 | tag))
-                lg("setInt %d = %x (zatial ignorovane)", tag, v);
+                lg("setInt %d = %x (ignored for now)", tag, v);
         }
         return;
     }
-    if (tag == 1022) {                              /* rave-17: ATI zápis hĺbky */
+    if (tag == 1022) {                              /* rave-17: ATI depth write */
         c->atiZWrite = v != 0;
         return;
     }
-    if (tag == 1020) {                              /* rave-22: ATI modulácia 2× */
+    if (tag == 1020) {                              /* rave-22: ATI 2× modulation */
         c->ati2x = v != 0 && !gNo2x;
         c->hwBlend = -1;
         return;
     }
     if (first_time(0x30000000 | ((tag & 0xfff) << 12) | (v & 0xfff)))
-        lg("setInt %d = %x (neznamy)", tag, v);   /* rave-15: každá nová hodnota */
+        lg("setInt %d = %x (unknown)", tag, v);   /* rave-15: every new value */
 }
 
 static void SetPtr(TQADrawContext *dc, long tag, const void *v)
@@ -959,7 +959,7 @@ static void SetPtr(TQADrawContext *dc, long tag, const void *v)
         return;
     }
     if (first_time(0x40000000 | tag))
-        lg("setPtr %d = %x (neznamy)", tag, (NVU32)v);
+        lg("setPtr %d = %x (unknown)", tag, (NVU32)v);
 }
 
 static float GetFloat(const TQADrawContext *dc, long tag)
@@ -969,7 +969,7 @@ static float GetFloat(const TQADrawContext *dc, long tag)
     if (tag >= 0 && tag < STATE_MAX)
         return CTX(dc)->sf[tag];
     if (first_time(0x50000000 | tag))
-        lg("getFloat %d (neznamy)", tag);
+        lg("getFloat %d (unknown)", tag);
     return 0.0f;
 }
 
@@ -980,26 +980,26 @@ static unsigned long GetInt(const TQADrawContext *dc, long tag)
     if (tag >= 0 && tag < STATE_MAX)
         return CTX(dc)->si[tag];
     if (tag == 1011 && gSpoofATI) {
-        /* rave-24: ATI typ čipu. UT IsRageProAvail (štartovací dialóg): ≥ 772 = RAVE dostupné,
-         * ≥ 1280 = novší čip; OpenGLRendererATI: 777 = Rage Mobility */
-        /* minigl-12: URaveRenderDevice pri > 772 kreslí svetelné mapy ako druhú textúru cez súkromné
-         * ATI tagy 1012–1039/1018 (engine ich nevie) → UT bez tieňov. 772 = dialóg RAVE ponúkne,
-         * hra kreslí svetelné mapy druhým prechodom. */
+        /* rave-24: ATI chip type. UT IsRageProAvail (startup dialog): ≥ 772 = RAVE available,
+         * ≥ 1280 = newer chip; OpenGLRendererATI: 777 = Rage Mobility */
+        /* minigl-12: with > 772 URaveRenderDevice draws lightmaps as a second texture through private
+         * ATI tags 1012–1039/1018 (the engine does not know them) → UT without shadows. 772 = the dialog offers RAVE,
+         * the game draws lightmaps in a second pass. */
         NVU32 v = gAtiGL ? 1280 : 772;
         if (first_time(0x60000000 | tag))
-            lg("getInt 1011 -> %u (ATI cip)", v);
+            lg("getInt 1011 -> %u (ATI chip)", v);
         return v;
     }
     if (first_time(0x60000000 | tag))
-        lg("getInt %d (neznamy)", tag);
+        lg("getInt %d (unknown)", tag);
     return 0;
 }
 
-/* ---- súkromná ATI tabuľka (getPtr 1021) — rave-19 ------------------------------------------
- * UT RaveDrv (URaveRenderDevice) pri vendore ATI: Lock → [0](ctx, 0) zmaže farbu, [1](ctx, 0)
- * z-buffer; ClearZ (po oblohe) → [1](ctx, 0); DownloadTexture → [2](4, ?, &TQAImage, textúra)
- * nahradí obsah existujúcej textúry. Bez ATI UT z-buffer po oblohe nemaže → obloha presvitá.
- * Ostatné položky (OpenGLRendererATI ich používa viac) len zalogujú volanie. */
+/* ---- private ATI table (getPtr 1021) — rave-19 ------------------------------------------
+ * UT RaveDrv (URaveRenderDevice) with vendor ATI: Lock → [0](ctx, 0) clears color, [1](ctx, 0)
+ * the z-buffer; ClearZ (after the sky) → [1](ctx, 0); DownloadTexture → [2](4, ?, &TQAImage, texture)
+ * replaces the contents of an existing texture. Without ATI, UT does not clear the z-buffer after the sky → the sky shows through.
+ * The other entries (OpenGLRendererATI uses more of them) only log the call. */
 static void clear_buffers(Ctx *c, int color, int depth);
 static void reupload_level0(TQATexture *t, const TQAImage *img);
 
@@ -1032,14 +1032,14 @@ static long AtiTexUpdate(long a, long b, const TQAImage *img, TQATexture *t)
         reupload_level0(t, img);
     } else if (t && t->magic == 'NVtx' && img && gAtiMismatch < 8) {
         gAtiMismatch++;
-        lg("ATI[2] nesedi: img %dx%d rb %d, textura %ux%u typ %d levels %u (a %x b %x)", img->width, img->height,
+        lg("ATI[2] mismatch: img %dx%d rb %d, texture %ux%u type %d levels %u (a %x b %x)", img->width, img->height,
            img->rowBytes, t->w, t->h, t->pixelType, t->levels, a, b);
     }
     return 0;
 }
 
 #define ATI_STUB(n) static long AtiStub##n(long a, long b, long c, long d) { \
-    if (first_time(0x15000000 | n)) { lg("ATI[%d] (%x, %x, %x, %x) nepodporovane", n, a, b, c, d); } \
+    if (first_time(0x15000000 | n)) { lg("ATI[%d] (%x, %x, %x, %x) unsupported", n, a, b, c, d); } \
     else CL("ATI[%d]", n); \
     return 0; }
 ATI_STUB(3) ATI_STUB(4) ATI_STUB(5) ATI_STUB(6) ATI_STUB(7) ATI_STUB(8) ATI_STUB(9) ATI_STUB(10)
@@ -1053,7 +1053,7 @@ ATI_STUB(59) ATI_STUB(60) ATI_STUB(61) ATI_STUB(62) ATI_STUB(63) ATI_STUB(64) AT
 ATI_STUB(67) ATI_STUB(68) ATI_STUB(69) ATI_STUB(70) ATI_STUB(71) ATI_STUB(72) ATI_STUB(73) ATI_STUB(74)
 ATI_STUB(75) ATI_STUB(76) ATI_STUB(77) ATI_STUB(78) ATI_STUB(79)
 
-/* gl-q2-7: glrVendorGetDispatchTable číta aj pozície 31–60 (bajty 124–240) ako funkcie kreslenia */
+/* gl-q2-7: glrVendorGetDispatchTable also reads positions 31–60 (bytes 124–240) as drawing functions */
 static void *gAtiTable[80] = {
     (void *)AtiClearColor, (void *)AtiClearZ, (void *)AtiTexUpdate, (void *)AtiStub3, (void *)AtiStub4,
     (void *)AtiStub5, (void *)AtiStub6, (void *)AtiStub7, (void *)AtiStub8, (void *)AtiStub9,
@@ -1078,14 +1078,14 @@ static void *GetPtr(const TQADrawContext *dc, long tag)
     CL("getPtr %d", tag);
     if (tag == 1021 && gSpoofATI) {
         if (first_time(0x70000000 | tag))
-            lg("getPtr 1021 -> ATI tabulka");
+            lg("getPtr 1021 -> ATI table");
         return gAtiTable;
     }
     if (gTrace) { tr_flush(); TR("getPtr %d", tag); }
     if (tag == kQATag_Texture)
         return CTX(dc)->tex;
     if (first_time(0x70000000 | tag))
-        lg("getPtr %d (neznamy)", tag);
+        lg("getPtr %d (unknown)", tag);
     return 0;
 }
 
@@ -1111,7 +1111,7 @@ static void DrawPoint(const TQADrawContext *dc, const TQAVGouraud *v)
 {
     tr_vg("Point", CTX(dc), 1, 0, v);
     if (first_time(0x13000000 | 1))
-        lg("prvy DrawPoint");
+        lg("first DrawPoint");
     Ctx *c = CTX(dc);
     if (!prepare(c, MODE_GOURAUD))
         return;
@@ -1125,7 +1125,7 @@ static void DrawLine(const TQADrawContext *dc, const TQAVGouraud *v0, const TQAV
 {
     tr_vg("Line", CTX(dc), 2, 0, v0);
     if (first_time(0x13000000 | 2))
-        lg("prvy DrawLine");
+        lg("first DrawLine");
     Ctx *c = CTX(dc);
     if (!prepare(c, MODE_GOURAUD))
         return;
@@ -1142,7 +1142,7 @@ static void DrawTriGouraud(const TQADrawContext *dc, const TQAVGouraud *v0, cons
     CTX(dc)->flat2D = v0->z <= 0.0f && v1->z <= 0.0f && v2->z <= 0.0f;
     tr_vg("TriG", CTX(dc), 1, 3, v0);
     if (first_time(0x13000000 | 3))
-        lg("prvy DrawTriGouraud");
+        lg("first DrawTriGouraud");
     Ctx *c = CTX(dc);
     (void)flags;
     if (!prepare(c, MODE_GOURAUD))
@@ -1163,7 +1163,7 @@ static void DrawTriTexture(const TQADrawContext *dc, const TQAVTexture *v0, cons
                       v0->invW == 1.0f && v1->invW == 1.0f && v2->invW == 1.0f;
     tr_vt("TriT", CTX(dc), 1, 3, v0);
     if (first_time(0x13000000 | 4))
-        lg("prvy DrawTriTexture");
+        lg("first DrawTriTexture");
     Ctx *c = CTX(dc);
     (void)flags;
     if (!prepare(c, MODE_TEXTURE))
@@ -1183,7 +1183,7 @@ static void DrawVGouraud(const TQADrawContext *dc, unsigned long n, long mode, c
     CTX(dc)->flat2D = flat_g(v, n);
     if (n) tr_vg("VG", CTX(dc), n, mode, &v[0]);
     if (first_time(0x13000000 | 5))
-        lg("prvy DrawVGouraud");
+        lg("first DrawVGouraud");
     Ctx *c = CTX(dc);
     unsigned long i;
     (void)flags;
@@ -1203,7 +1203,7 @@ static void DrawVTexture(const TQADrawContext *dc, unsigned long n, long mode, c
     CTX(dc)->flat2D = flat_t(v, n);
     if (n) tr_vt("VT", CTX(dc), n, mode, &v[0]);
     if (first_time(0x13000000 | 6))
-        lg("prvy DrawVTexture");
+        lg("first DrawVTexture");
     Ctx *c = CTX(dc);
     unsigned long i;
     (void)flags;
@@ -1234,7 +1234,7 @@ static void DrawTriMeshGouraud(const TQADrawContext *dc, unsigned long n, const 
     CTX(dc)->flat2D = 0;
     TR("MeshG n %u nv %u", n, CTX(dc)->nvg);
     if (first_time(0x13000000 | 7))
-        lg("prvy DrawTriMeshGouraud");
+        lg("first DrawTriMeshGouraud");
     Ctx *c = CTX(dc);
     unsigned long i, k;
     if (!n || !c->vg || !prepare(c, MODE_GOURAUD))
@@ -1253,7 +1253,7 @@ static void DrawTriMeshTexture(const TQADrawContext *dc, unsigned long n, const 
     CTX(dc)->flat2D = 0;
     if (CTX(dc)->vt && CTX(dc)->nvt) tr_vt("MeshT", CTX(dc), n, 0, &CTX(dc)->vt[0]);
     if (first_time(0x13000000 | 8))
-        lg("prvy DrawTriMeshTexture");
+        lg("first DrawTriMeshTexture");
     Ctx *c = CTX(dc);
     unsigned long i, k;
     if (!n || !c->vt || !prepare(c, MODE_TEXTURE))
@@ -1267,12 +1267,12 @@ static void DrawTriMeshTexture(const TQADrawContext *dc, unsigned long n, const 
     c->tris += n;
 }
 
-/* bitmapa = obdĺžnik s RECT textúrou, ľavý horný roh vo v->x, v->y */
+/* bitmap = rectangle with a RECT texture, top left corner at v->x, v->y */
 static void DrawBitmap(const TQADrawContext *dc, const TQAVGouraud *v, TQABitmap *bitmap)
 {
     tr_vg("Bitmap", CTX(dc), 1, 0, v);
     if (first_time(0x13000000 | 9))
-        lg("prvy DrawBitmap");
+        lg("first DrawBitmap");
     Ctx *c = CTX(dc);
     TQATexture *t = (TQATexture *)bitmap;
     TQATexture *save = c->tex;
@@ -1306,7 +1306,7 @@ static void DrawBitmap(const TQADrawContext *dc, const TQAVGouraud *v, TQABitmap
     q[2].x = x1; q[2].y = y1; q[2].uOverW = tw; q[2].vOverW = th;
     q[3].x = x0; q[3].y = y1; q[3].uOverW = 0; q[3].vOverW = th;
     c->tex = t;
-    /* Alpha1 bitmapa nesie farbu vrcholu, ostatné vlastnú */
+    /* an Alpha1 bitmap carries the vertex color, the others their own */
     c->si[kQATag_TextureOp] = t->pixelType == kQAPixel_Alpha1 ? kQATextureOp_Modulate : kQATextureOp_None;
     if (prepare(c, MODE_TEXTURE)) {
         prim_begin(PRIM_TRI_FAN);
@@ -1319,7 +1319,7 @@ static void DrawBitmap(const TQADrawContext *dc, const TQAVGouraud *v, TQABitmap
     c->si[kQATag_TextureOp] = saveOp;
 }
 
-/* ---- buffre ---------------------------------------------------------------- */
+/* ---- buffers ---------------------------------------------------------------- */
 
 static void clear_buffers(Ctx *c, int color, int depth)
 {
@@ -1352,7 +1352,7 @@ static void clear_buffers(Ctx *c, int color, int depth)
         begin(M_CLEAR_BUFFERS, 1);
         data(bits);
     } else {
-        /* na obrazovke: CLEAR by zmazal celý RT → obdĺžnik v rozsahu kontextu */
+        /* on the screen: CLEAR would clear the whole RT → a rectangle covering the context */
         TQAVGouraud q[4];
         int i;
         memset(q, 0, sizeof(q));
@@ -1409,14 +1409,14 @@ static void RenderStart(const TQADrawContext *dc, const TQARect *dirty, const TQ
         km[7] = 0;
         if (gTraceOn)
             GetKeys(km);
-        int caps = (km[7] & 0x02) != 0;         /* Caps Lock (kód 0x39) */
-        if (caps && !gCapsWas && gTraceDone < 2) {  /* každé zapnutie = 1 snímka, max. 2 */
+        int caps = (km[7] & 0x02) != 0;         /* Caps Lock (key code 0x39) */
+        if (caps && !gCapsWas && gTraceDone < 2) {  /* every press = 1 frame, max. 2 */
             gTrace = 1;
             gTraceDone++;
             gTraceLines = 0;
             gTrRun = 0;
             gTrSig[1] = 0xffffffff;
-            lg("---- zaznam snimky %d ----", gTraceDone);
+            lg("---- frame record %d ----", gTraceDone);
         }
         gCapsWas = caps;
     }
@@ -1441,7 +1441,7 @@ static void RenderStart(const TQADrawContext *dc, const TQARect *dirty, const TQ
     }
 }
 
-/* QuickDraw región → obdĺžniky (pásy), prienik s obdĺžnikom r; volá blit pre každý */
+/* QuickDraw region → rectangles (bands), intersected with rectangle r; calls blit for each */
 #define MAX_XS 128
 
 static int toggle_x(short *xs, int n, short x)
@@ -1481,7 +1481,7 @@ static void present(Ctx *c, const TQARect *mod)
     TQARect lim = c->rect;
     Region *rg;
 
-    if (mod) {                                      /* modifiedRect je relatívny ku kontextu */
+    if (mod) {                                      /* modifiedRect is relative to the context */
         if (c->rect.left + mod->left > lim.left) lim.left = c->rect.left + mod->left;
         if (c->rect.top + mod->top > lim.top) lim.top = c->rect.top + mod->top;
         if (c->rect.left + mod->right < lim.right) lim.right = c->rect.left + mod->right;
@@ -1489,10 +1489,10 @@ static void present(Ctx *c, const TQARect *mod)
     }
     screen_geom(c);
     if (((*(*c->gd)->gdPMap)->pixelSize) != c->bpp)
-        return;                                     /* hĺbka obrazovky sa zmenila */
+        return;                                     /* the screen depth changed */
     if (S->ensure3D() != 0 || S->a->depth != (NVU32)c->bpp)
-        return;                                     /* 2D povrch QD Accel = aktuálna obrazovka */
-    /* 2D a 3D sú v tom istom PGRAPH → blit prebehne po kreslení, sync netreba */
+        return;                                     /* QD Accel 2D surface = the current screen */
+    /* 2D and 3D are in the same PGRAPH → the blit runs after the drawing, no sync needed */
     if (!c->clip || !*c->clip || (*c->clip)->rgnSize == 10) {
         if (c->clip && *c->clip) {
             Rect *bb = &(*c->clip)->rgnBBox;
@@ -1532,7 +1532,7 @@ static TQAError RenderEnd(const TQADrawContext *dc, const TQARect *modified)
         tr_flush();
         TR("RenderEnd");
         gTrace = 0;
-        lg("---- koniec zaznamu (%u riadkov) ----", gTraceLines);
+        lg("---- end of record (%u lines) ----", gTraceLines);
     }
     Ctx *c = CTX(dc);
     TQANoticeMethod done = c->notice[kQAMethod_RenderCompletion];
@@ -1609,7 +1609,7 @@ static TQAError SetNoticeMethod(const TQADrawContext *dc, long method, TQANotice
     c->noticeRef[method] = ref;
     if (cb.standardNoticeMethod && method != kQAMethod_RenderCompletion &&
         method != kQAMethod_BufferInitialize && first_time(0x80000000 | method))
-        lg("setNoticeMethod %d (nevolane)", method);
+        lg("setNoticeMethod %d (not called)", method);
     return kQANoErr;
 }
 
@@ -1665,7 +1665,7 @@ static TQAError ClearDrawBuffer(const TQADrawContext *dc, const TQARect *r, cons
     CL("ClearDrawBuffer");
     if (gTrace) { tr_flush(); TR("ClearDrawBuffer"); }
     if (first_time(0x14000001))
-        lg("prvy ClearDrawBuffer");
+        lg("first ClearDrawBuffer");
     (void)r;
     (void)init;
     clear_buffers(CTX(dc), 1, 0);
@@ -1677,7 +1677,7 @@ static TQAError ClearZBuffer(const TQADrawContext *dc, const TQARect *r, const T
     CL("ClearZBuffer");
     if (gTrace) { tr_flush(); TR("ClearZBuffer"); }
     if (first_time(0x14000002))
-        lg("prvy ClearZBuffer");
+        lg("first ClearZBuffer");
     (void)r;
     (void)init;
     clear_buffers(CTX(dc), 0, 1);
@@ -1707,7 +1707,7 @@ static TQAError BitmapFromContext(const TQADrawContext *dc, unsigned long flags,
     return kQANotSupported;
 }
 
-/* ---- metódy enginu --------------------------------------------------------- */
+/* ---- engine methods --------------------------------------------------------- */
 
 static int device_ok(const TQADevice *d, PixMapPtr *out)
 {
@@ -1729,28 +1729,28 @@ static int device_ok(const TQADevice *d, PixMapPtr *out)
 
 static TQAError EngineCheckDevice(const TQADevice *d)
 {
-    CL("CheckDevice typ %d gd %x", d ? d->deviceType : -1, d && d->deviceType == 1 ? (NVU32)d->device.gDevice : 0);
+    CL("CheckDevice type %d gd %x", d ? d->deviceType : -1, d && d->deviceType == 1 ? (NVU32)d->device.gDevice : 0);
     if (device_ok(d, 0))
         return kQANoErr;
-    /* gl-q2-2: OpenGLRendererATI (glrGetFullScreenRendererInfo) hľadá enginy so zariadením
-     * {GDevice, NULL} = „ktorákoľvek obrazovka“ */
+    /* gl-q2-2: OpenGLRendererATI (glrGetFullScreenRendererInfo) looks for engines with the device
+     * {GDevice, NULL} = "any screen" */
     if (d && d->deviceType == kQADeviceGDevice && !d->device.gDevice && shared() && S->state3D != 2) {
         if (first_time(0xD2000000))
-            lg("CheckDevice: GDevice NULL prijaty");
+            lg("CheckDevice: GDevice NULL accepted");
         return kQANoErr;
     }
     if (d && d->deviceType == kQADeviceGDevice && d->device.gDevice) {
         PixMapPtr pm = *(*d->device.gDevice)->gdPMap;
         if (first_time(0xD0000000 | pm->pixelSize))
-            lg("CheckDevice: GDevice %d bpp odmietnuty", pm->pixelSize);
+            lg("CheckDevice: GDevice %d bpp rejected", pm->pixelSize);
     } else if (d && first_time(0xD1000000 | d->deviceType)) {
-        lg("CheckDevice: typ zariadenia %d odmietnuty", d->deviceType);
+        lg("CheckDevice: device type %d rejected", d->deviceType);
     }
     return kQAError;
 }
 
-/* gestalt 1002: tabuľka funkcií ATI (glrSetConfigData volá [7](blk, &flagy) a [8](blk, &hodnota);
- * blk = {1, zariadenie}). Význam odhadnutý z použitia: [8] ~ veľkosť VRAM, [7] bity 0–2. */
+/* gestalt 1002: ATI function table (glrSetConfigData calls [7](blk, &flags) and [8](blk, &value);
+ * blk = {1, device}). Meaning guessed from usage: [8] ~ VRAM size, [7] bits 0–2. */
 static long AtiInfoFlags(const long *blk, unsigned long *out)
 {
     if (first_time(0x16000007))
@@ -1770,7 +1770,7 @@ static long AtiInfoMem(const long *blk, unsigned long *out)
 }
 
 #define INFO_STUB(n) static long AtiInfoStub##n(long a, long b, long c, long d) { \
-    if (first_time(0x16000000 | n)) { lg("ATIinfo[%d] (%x, %x, %x, %x) nepodporovane", n, a, b, c, d); } \
+    if (first_time(0x16000000 | n)) { lg("ATIinfo[%d] (%x, %x, %x, %x) unsupported", n, a, b, c, d); } \
     else CL("ATIinfo[%d]", n); \
     return 0; }
 INFO_STUB(0) INFO_STUB(1) INFO_STUB(2) INFO_STUB(3) INFO_STUB(4) INFO_STUB(5) INFO_STUB(6)
@@ -1796,7 +1796,7 @@ static TQAError EngineGestalt(long sel, void *resp)
         *r = kQAOptional_DeepZ | kQAOptional_Texture | kQAOptional_TextureHQ | kQAOptional_TextureColor |
              kQAOptional_Blend | kQAOptional_BlendAlpha | kQAOptional_OpenGL | kQAOptional_CL8 | kQAOptional_NoDither |
              kQAOptional_AccessDrawBuffer | kQAOptional_ClearDrawBuffer | kQAOptional_ClearZBuffer;
-        /* gl-q2-3: OpenGLRendererATI berie engine pre obrazovku iba s BoundToDevice (ako ATI) */
+        /* gl-q2-3: OpenGLRendererATI only takes an engine for the screen with BoundToDevice (like ATI) */
         if (gAtiGL)
             *r |= kQAOptional_BoundToDevice;
         break;
@@ -1804,7 +1804,7 @@ static TQAError EngineGestalt(long sel, void *resp)
         *r = kQAFast_Line | kQAFast_Gouraud | kQAFast_Texture | kQAFast_TextureHQ | kQAFast_Blend;
         break;
     case kQAGestalt_VendorID:
-        *r = gSpoofATI ? 1 : VENDOR_ID;            /* boot-args nv34raveati: test, či hra chce ATI */
+        *r = gSpoofATI ? 1 : VENDOR_ID;            /* boot-args nv34raveati: tests whether the game wants ATI */
         break;
     case kQAGestalt_EngineID:
         *r = gSpoofATI ? 5 : ENGINE_ID;
@@ -1844,22 +1844,22 @@ static TQAError EngineGestalt(long sel, void *resp)
         break;
     default:
         if (gAtiGL && sel >= 1000 && sel <= 1010) {
-            /* gl-q2-4: súkromné ATI gestalty (OpenGLRendererATI) — nezapísaná odpoveď = smeti */
+            /* gl-q2-4: private ATI gestalts (OpenGLRendererATI) — an unwritten answer = garbage */
             if (sel == 1001)
                 *r = S ? S->a->vramSize : 0x02000000;       /* glrVendorBoardMemory */
             else if (sel == 1002)
-                *(void **)resp = gAtiInfoTable;             /* glrSetConfigData: tabuľka funkcií */
+                *(void **)resp = gAtiInfoTable;             /* glrSetConfigData: function table */
             else
                 *r = 0;
         } else {
             err = kQAGestaltUnknown;
         }
     }
-    /* každý dotaz (max. 48 na proces) s odpoveďou — z toho vidno, čo hra/RAVE kontroluje */
+    /* every query (max. 48 per process) with its answer — shows what the game/RAVE checks */
     if (gGestaltLogs < 100) {
         gGestaltLogs++;
         if (err)
-            lg("gestalt %d -> neznamy", sel);
+            lg("gestalt %d -> unknown", sel);
         else if (sel >= 1000)
             lg("gestalt %d -> %x (ATI)", sel, *r);
         else if (sel == kQAGestalt_ASCIIName)
@@ -1882,16 +1882,16 @@ static void free_ctx_mem(Ctx *c)
 static TQAError DrawPrivateNew(TQADrawContext *dc, const TQADevice *d, const TQARect *rect,
                                const TQAClip *clip, unsigned long flags)
 {
-    CL("DrawPrivateNew typ %d gd %x rect %d,%d-%d,%d fl %x", d ? d->deviceType : -1, d ? (NVU32)d->device.gDevice : 0, rect ? rect->left : 0, rect ? rect->top : 0, rect ? rect->right : 0, rect ? rect->bottom : 0, flags);
+    CL("DrawPrivateNew type %d gd %x rect %d,%d-%d,%d fl %x", d ? d->deviceType : -1, d ? (NVU32)d->device.gDevice : 0, rect ? rect->left : 0, rect ? rect->top : 0, rect ? rect->right : 0, rect ? rect->bottom : 0, flags);
     PixMapPtr pm;
     Ctx *c;
 
     if (!device_ok(d, &pm)) {
-        lg("DrawPrivateNew: zariadenie nepodporovane");
+        lg("DrawPrivateNew: device unsupported");
         return kQANotSupported;
     }
     if (S->ensure3D() != 0) {
-        lg("DrawPrivateNew: 3D init zlyhal");
+        lg("DrawPrivateNew: 3D init failed");
         return kQAError;
     }
     c = (Ctx *)NewPtrSysClear(sizeof(Ctx));
@@ -1913,15 +1913,15 @@ static TQAError DrawPrivateNew(TQADrawContext *dc, const TQADevice *d, const TQA
         return kQAParamErr;
     }
     c->bpp = pm->pixelSize;
-    c->z24 = c->bpp == 32;                          /* na obrazovku (bez double buffra) pri 16 bpp Z16 */
+    c->z24 = c->bpp == 32;                          /* to the screen (no double buffer) at 16 bpp Z16 */
     if (c->dbl) {
-        /* rave-16: UT (z = 1 − 1/w) potrebuje Z24 aj v Thousands — Z16 nerozlíši vzdialené steny
-         * od oblohy (obloha presvitá). Zeta má 4 B/pixel a pitch farby musí byť rovnaký. */
+        /* rave-16: UT (z = 1 − 1/w) needs Z24 in Thousands too — Z16 cannot tell far walls
+         * from the sky (the sky shows through). Zeta is 4 B/pixel and the color pitch must be the same. */
         c->z24 = c->bpp == 32 || !gZ16;
         c->backPitch = (c->width * (c->z24 ? 4 : c->bpp / 8) + 63) & ~63L;
         c->backOff = S->vramAlloc(c->backPitch * c->height, 4096);
         if (!c->backOff) {
-            lg("DrawPrivateNew: malo VRAM pre zadny buffer");
+            lg("DrawPrivateNew: not enough VRAM for the back buffer");
             DisposePtr((Ptr)c);
             return kQAOutOfVideoMemory;
         }
@@ -1929,11 +1929,11 @@ static TQAError DrawPrivateNew(TQADrawContext *dc, const TQADevice *d, const TQA
     if (c->hasZ) {
         long zw = c->dbl ? c->width : pm->bounds.right - pm->bounds.left;
         long zh = c->dbl ? c->height : pm->bounds.bottom - pm->bounds.top;
-        c->zPitch = c->dbl ? c->backPitch : c->pitch;   /* rovnaký ako farba */
+        c->zPitch = c->dbl ? c->backPitch : c->pitch;   /* same as color */
         (void)zw;
         c->zOff = S->vramAlloc(c->zPitch * zh, 4096);
         if (!c->zOff) {
-            lg("DrawPrivateNew: malo VRAM pre z-buffer");
+            lg("DrawPrivateNew: not enough VRAM for the z-buffer");
             free_ctx_mem(c);
             DisposePtr((Ptr)c);
             return kQAOutOfVideoMemory;
@@ -1991,7 +1991,7 @@ static TQAError DrawPrivateNew(TQADrawContext *dc, const TQADevice *d, const TQA
     dc->busy = Busy;
     dc->swapBuffers = SwapBuffers;
 
-    lg("kontext %u: %dx%d %d bpp z%d na (%d,%d) flags %x %s%s back %x pitch %u z %x pitch %u", c->id, c->width, c->height, c->bpp, c->z24 ? 24 : 16,
+    lg("context %u: %dx%d %d bpp z%d at (%d,%d) flags %x %s%s back %x pitch %u z %x pitch %u", c->id, c->width, c->height, c->bpp, c->z24 ? 24 : 16,
        rect->left, rect->top, flags, c->dbl ? "double " : "", c->hasZ ? "z" : "", c->backOff, c->backPitch,
        c->zOff, c->zPitch);
     return kQANoErr;
@@ -2005,7 +2005,7 @@ static void DrawPrivateDelete(TQADrawPrivate *p)
         return;
     if (S) {
         gpu_sync();
-        lg("kontext %u koniec: %u snimok, %u trojuholnikov, %u textur uvolnenych z VRAM, volne %u B",
+        lg("context %u end: %u frames, %u triangles, %u textures evicted from VRAM, free %u B",
            c->id, c->frames, c->tris, gEvictions, S->vramFreeBytes());
         free_ctx_mem(c);
         if (S->boundCtxId == c->id)
@@ -2014,7 +2014,7 @@ static void DrawPrivateDelete(TQADrawPrivate *p)
     DisposePtr((Ptr)c);
 }
 
-/* ---- textúry a bitmapy ------------------------------------------------------- */
+/* ---- textures and bitmaps ------------------------------------------------------- */
 
 static NVU32 log2u(NVU32 v)
 {
@@ -2074,7 +2074,7 @@ static NVU32 texel(const TQATexture *t, const TQAImage *im, long x, long y)
     return 0xFFFF00FF;
 }
 
-/* NV swizzle: bity x a y sa striedajú (x prvý), zvyšok väčšieho rozmeru nasleduje */
+/* NV swizzle: x and y bits alternate (x first), the rest of the larger dimension follows */
 static NVU32 swz(NVU32 x, NVU32 y, NVU32 lw, NVU32 lh)
 {
     NVU32 o = 0, bit = 0, i;
@@ -2088,9 +2088,9 @@ static NVU32 swz(NVU32 x, NVU32 y, NVU32 lw, NVU32 lh)
 }
 
 
-static int gTexSwap16;      /* boot-args nv34tex16swap: prehodiť dvojice 16-bit texelov (test) */
+static int gTexSwap16;      /* boot-args nv34tex16swap: swap pairs of 16-bit texels (test) */
 
-/* kópia z RAM do VRAM (GPU textúru práve nečíta: nová alebo po sync) */
+/* copy from RAM to VRAM (the GPU is not reading the texture right now: new or after a sync) */
 static void vram_put(TQATexture *t)
 {
     volatile NVU32 *d = (volatile NVU32 *)(S->a->vram + t->off);
@@ -2101,7 +2101,7 @@ static void vram_put(TQATexture *t)
     __asm__ volatile("sync" ::: "memory");
 }
 
-/* VRAM pre textúru; pri nedostatku po sync uvoľní najdlhšie nepoužité textúry */
+/* VRAM for a texture; when short, after a sync evicts the least recently used textures */
 static int tex_resident(TQATexture *t)
 {
     if (t->off)
@@ -2131,8 +2131,8 @@ static int tex_resident(TQATexture *t)
         gTexEpoch++;
         if (gEvictLogged < 4) {
             gEvictLogged++;
-            lg("VRAM plna: %u textur uvolnenych, volne %u B, %s", gEvictions, S->vramFreeBytes(),
-               t->off ? "ok" : "stale malo");
+            lg("VRAM full: %u textures evicted, free %u B, %s", gEvictions, S->vramFreeBytes(),
+               t->off ? "ok" : "still not enough");
         }
         if (!t->off)
             return 0;
@@ -2141,7 +2141,7 @@ static int tex_resident(TQATexture *t)
     return 1;
 }
 
-/* rave-23: swizzle cez tabuľky — bity x a y idú na pevné pozície, offset = sx[x] | sy[y] */
+/* rave-23: swizzle through tables — the x and y bits go to fixed positions, offset = sx[x] | sy[y] */
 static NVU32 gSwX[2048], gSwY[2048];
 
 static void swz_tables(NVU32 w, NVU32 h, NVU32 lw, NVU32 lh)
@@ -2158,8 +2158,8 @@ static void upload(TQATexture *t, const TQAImage *images)
     NVU32 *base = (NVU32 *)t->sys;
     UInt16 *base16 = (UInt16 *)base;
     NVU32 lvl, x, y, w = t->w, h = t->h, lw = t->log2w, lh = t->log2h;
-    /* RAVE/QD3D: textúra má počiatok (u,v) = (0,0) vľavo DOLE (rave-4: UT menu a text hore
-     * nohami); kQATexture_FlipOrigin = vľavo hore. Bitmapy sa kreslia zhora nadol. */
+    /* RAVE/QD3D: a texture has its origin (u,v) = (0,0) at the BOTTOM left (rave-4: UT menu and text upside
+     * down); kQATexture_FlipOrigin = top left. Bitmaps are drawn top to bottom. */
     int flip = t->rect ? (t->flags & kQATexture_FlipOrigin) != 0 : !(t->flags & kQATexture_FlipOrigin);
 
     if (t->bpp == 2) {
@@ -2207,20 +2207,20 @@ static void upload(TQATexture *t, const TQAImage *images)
         vram_put(t);
 }
 
-/* nový obsah úrovne 0 (ATI[2]); nižšie mipmapy ostanú */
-/* rave-22: bez čakania na GPU (voda v UT sa mení každú snímku → sync spomaľoval) — druhá
- * oblasť VRAM sa strieda s prvou; push buffer (32 KB) je kratší ako snímka, takže GPU staršiu
- * oblasť už dávno dočítal, keď na ňu príde rad */
+/* new contents of level 0 (ATI[2]); the lower mipmaps stay */
+/* rave-22: no waiting for the GPU (UT's water changes every frame → the sync slowed it down) — a second
+ * VRAM area alternates with the first; the push buffer (32 KB) is shorter than a frame, so the GPU has
+ * long finished reading the older area by the time it comes around again */
 static void reupload_level0(TQATexture *t, const TQAImage *img)
 {
     NVU32 levels = t->levels, off = t->off, tmp;
     t->levels = 1;
     t->off = 0;
-    upload(t, img);                                 /* iba do RAM */
+    upload(t, img);                                 /* RAM only */
     t->levels = levels;
     t->off = off;
     if (!t->off)
-        return;                                     /* do VRAM pri ďalšom použití */
+        return;                                     /* to VRAM on the next use */
     if (!t->alt)
         t->alt = S->vramAlloc(t->size, 256);
     if (!t->alt) {
@@ -2232,7 +2232,7 @@ static void reupload_level0(TQATexture *t, const TQAImage *img)
     t->off = t->alt;
     t->alt = tmp;
     vram_put(t);
-    gTexEpoch++;                                    /* kontexty znova nastavia TEX_OFFSET */
+    gTexEpoch++;                                    /* contexts set TEX_OFFSET again */
 }
 
 static TQAError new_image(unsigned long flags, long pixelType, const TQAImage images[], int rect,
@@ -2257,12 +2257,12 @@ static TQAError new_image(unsigned long flags, long pixelType, const TQAImage im
     t->log2h = log2u(t->h);
     t->levels = 1;
     if (t->w > 2048 || t->h > 2048) {
-        lg("textura %ux%u prilis velka", t->w, t->h);
+        lg("texture %ux%u too large", t->w, t->h);
         DisposePtr((Ptr)t);
         return kQANotSupported;
     }
     if (!rect && ((1UL << t->log2w) != t->w || (1UL << t->log2h) != t->h)) {
-        lg("textura %ux%u nie je mocnina 2", t->w, t->h);
+        lg("texture %ux%u is not a power of 2", t->w, t->h);
         DisposePtr((Ptr)t);
         return kQANotSupported;
     }
@@ -2271,7 +2271,7 @@ static TQAError new_image(unsigned long flags, long pixelType, const TQAImage im
     t->fmt = 0x06;
     t->bpp = 4;
     if (!rect && (pixelType == kQAPixel_ARGB16 || pixelType == kQAPixel_RGB16)) {
-        t->fmt = 0x02;                          /* A1R5G5B5: polovica VRAM (rave-4: UT minul VRAM) */
+        t->fmt = 0x02;                          /* A1R5G5B5: half the VRAM (rave-4: UT ran out of VRAM) */
         t->bpp = 2;
     } else if (!rect && pixelType == kQAPixel_ARGB16_4444) {
         t->fmt = 0x04;
@@ -2289,17 +2289,17 @@ static TQAError new_image(unsigned long flags, long pixelType, const TQAImage im
         }
     }
     t->size = size;
-    t->sys = NewPtr((size + 3) & ~3UL);         /* halda aplikácie (UT má desiatky MB) */
+    t->sys = NewPtr((size + 3) & ~3UL);         /* application heap (UT has tens of MB) */
     if (!t->sys)
         t->sys = NewPtrSys((size + 3) & ~3UL);
     if (!t->sys) {
-        lg("textura %ux%u: malo RAM", t->w, t->h);
+        lg("texture %ux%u: out of RAM", t->w, t->h);
         DisposePtr((Ptr)t);
         return kQAOutOfMemory;
     }
     if (pixelType == kQAPixel_CL8 || pixelType == kQAPixel_CL4)
         for (i = 0; i < t->levels && i < 12; i++)
-            t->src[i] = images[i];              /* nahrá sa znova po pripojení CLUT */
+            t->src[i] = images[i];              /* re-uploaded after a CLUT is attached */
     CL(" new_image: sys %x size %u levels %u rb %d", (NVU32)t->sys, t->size, t->levels, images[0].rowBytes);
     upload(t, images);
     CL(" new_image: upload ok");
@@ -2316,17 +2316,17 @@ static TQAError new_image(unsigned long flags, long pixelType, const TQAImage im
         gTexList->prev = t;
     gTexList = t;
     t->lastUse = gFrame;
-    tex_resident(t);                            /* hneď do VRAM, ak je miesto */
-    CL(" new_image: hotovo off %x", t->off);
+    tex_resident(t);                            /* straight to VRAM if there is room */
+    CL(" new_image: done off %x", t->off);
     *out = t;
     return kQANoErr;
 }
 
 static TQAError TextureNew(unsigned long flags, TQAImagePixelType type, const TQAImage images[], TQATexture **out)
 {
-    CL("TextureNew typ %d %dx%d fl %x", type, images ? images[0].width : 0, images ? images[0].height : 0, flags);
+    CL("TextureNew type %d %dx%d fl %x", type, images ? images[0].width : 0, images ? images[0].height : 0, flags);
     if (first_time(0xA0000000 | (type << 16) | (flags & 0xffff)))
-        lg("textura typ %d %dx%d flags %x", type, images ? images[0].width : 0, images ? images[0].height : 0, flags);
+        lg("texture type %d %dx%d flags %x", type, images ? images[0].width : 0, images ? images[0].height : 0, flags);
     return new_image(flags, type, images, 0, out);
 }
 
@@ -2341,7 +2341,7 @@ static void TextureDelete(TQATexture *t)
     CL("TextureDelete %x", (NVU32)t);
     if (!t || t->magic != 'NVtx' || !S)
         return;
-    gpu_sync();                                     /* GPU už textúru nečíta */
+    gpu_sync();                                     /* the GPU no longer reads the texture */
     if (t->off)
         S->vramFree(t->off);
     if (t->alt)
@@ -2355,15 +2355,15 @@ static void TextureDelete(TQATexture *t)
     if (t->sys)
         DisposePtr((Ptr)t->sys);
     t->magic = 0;
-    S->boundCtxId = 0;                              /* hwTex mohol ukazovať na ňu */
+    S->boundCtxId = 0;                              /* hwTex may have pointed to it */
     DisposePtr((Ptr)t);
 }
 
 static TQAError BitmapNew(unsigned long flags, TQAImagePixelType type, const TQAImage *image, TQABitmap **out)
 {
-    CL("BitmapNew typ %d", type);
+    CL("BitmapNew type %d", type);
     if (first_time(0xB0000000 | type))
-        lg("bitmapa typ %d %dx%d flags %x", type, image ? image->width : 0, image ? image->height : 0, flags);
+        lg("bitmap type %d %dx%d flags %x", type, image ? image->width : 0, image ? image->height : 0, flags);
     return new_image(flags & kQABitmap_FlipOrigin ? kQATexture_FlipOrigin : 0, type, image, 1,
                      (TQATexture **)out);
 }
@@ -2405,7 +2405,7 @@ static TQAError TextureBindColorTable(TQATexture *t, TQAColorTable *clut)
     t->clut = clut;
     if (t->src[0].pixmap) {
         gpu_sync();
-        upload(t, t->src);                          /* do RAM a ak je rezidentná aj do VRAM */
+        upload(t, t->src);                          /* to RAM and, if resident, to VRAM too */
     }
     return kQANoErr;
 }
@@ -2415,7 +2415,7 @@ static TQAError BitmapBindColorTable(TQABitmap *b, TQAColorTable *clut)
     return TextureBindColorTable((TQATexture *)b, clut);
 }
 
-/* ---- registrácia ----------------------------------------------------------- */
+/* ---- registration ----------------------------------------------------------- */
 
 static TQAError EngineGetMethod(long tag, TQAEngineMethod *m)
 {
@@ -2461,7 +2461,7 @@ static int boot_arg(const char *word)
     return found;
 }
 
-/* meno aktuálneho procesu začína `prefix` (UT: ATI cesta RaveDrv, rave-19) */
+/* the current process name starts with `prefix` (UT: ATI path of RaveDrv, rave-19) */
 static int process_is(const char *prefix)
 {
     ProcessSerialNumber psn;
@@ -2483,17 +2483,17 @@ static int process_is(const char *prefix)
     return 1;
 }
 
-/* CFM init rutina (pef.py setinit): RAVE manager knižnicu načíta pri QAInit */
+/* CFM init routine (pef.py setinit): the RAVE manager loads the library on QAInit */
 OSErr TtRegister(void *initBlock)
 {
     (void)initBlock;
     if (!shared()) {
-        return noErr;                               /* bez QD Accel / NV34 sa engine neregistruje */
+        return noErr;                               /* without QD Accel / NV34 the engine does not register */
     }
     gSpoofATI = boot_arg("nv34raveati") || process_is("Unreal") || process_is("Quake");
-    /* minigl-9: UT bol so zmenami z gl-q2 (ATI gestalty, BoundToDevice) príliš svetlý → len Quake */
+    /* minigl-9: with the gl-q2 changes (ATI gestalts, BoundToDevice) UT was too bright → Quake only */
     gAtiGL = process_is("Quake");
-    /* minigl-13: log do súboru a záznam snímky len na požiadanie (spomaľujú hru) */
+    /* minigl-13: file log and frame recording only on request (they slow the game down) */
     gFileLog = boot_arg("nv34filelog");
     gTraceOn = boot_arg("nv34trace");
     gTexSwap16 = boot_arg("nv34tex16swap");
@@ -2511,7 +2511,7 @@ OSErr TtRegister(void *initBlock)
         if (GetCurrentProcess(&psn) == noErr)
             GetProcessInformation(&psn, &info);
         name[name[0] < 31 ? name[0] + 1 : 31] = 0;
-        lg("NV34 RAVE: registracia (3D stav %u) proces \"%s\"%s", S->state3D, (char *)name + 1,
+        lg("NV34 RAVE: registration (3D state %u) process \"%s\"%s", S->state3D, (char *)name + 1,
            gSpoofATI ? ", vendor ATI" : "");
     }
     return QARegisterEngine(EngineGetMethod) == kQANoErr ? noErr : paramErr;

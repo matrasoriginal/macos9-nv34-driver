@@ -7,7 +7,7 @@ Drivers and 3D for the **GeForce FX Go5200 (NV34)** in the **12" PowerBook G4 (P
 
 | Folder | File | What it is | Where it goes |
 |---|---|---|---|
-| For Extensions | **NV34 NDRV** 4.0.4 | video driver: 1024×768 / 800×600 / 640×480, 256 / Thousands / Millions | `System Folder:Extensions` |
+| For Extensions | **NV34 NDRV** 4.0.5 | video driver: 1024×768 / 800×600 / 640×480, 256 / Thousands / Millions | `System Folder:Extensions` |
 | For Extensions | **NV34 QD Accel** 1.9 | INIT: QuickDraw 2D acceleration, GPU manager (push buffer, VRAM) for 3D | `System Folder:Extensions` |
 | For Extensions | **NV34 RAVE** 1.1 | QuickDraw 3D RAVE engine (Unreal Tournament) | `System Folder:Extensions` |
 | For Game Folder | **OpenGLLibrary** (NV34 MiniGL 1.0) | our own OpenGL 1.1 + AGL on the GPU | **into the game folder** next to the application, not into Extensions |

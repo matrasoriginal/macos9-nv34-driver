@@ -10,7 +10,7 @@
 #include "nv34.h"
 
 #define DRV_MAJOR   0x04
-#define DRV_MINOR   0x04
+#define DRV_MINOR   0x05
 #define DRV_STAGE   finalStage
 #define DRV_REV     0
 
@@ -308,7 +308,7 @@ enum {
 
 static void publish_diag(UInt32 stage, OSStatus err)
 {
-    UInt32 d[30];
+    UInt32 d[34];
     int h;
     d[0] = (DRV_MAJOR << 24) | (DRV_MINOR << 16) | (DRV_STAGE << 8) | DRV_REV;
     d[1] = G.hw.boot0;
@@ -337,6 +337,8 @@ static void publish_diag(UInt32 stage, OSStatus err)
     }
     d[28] = G.fbCacheMode;
     d[29] = (UInt32)&gTrace;
+    for (h = 0; h < 4; h++)
+        d[30 + h] = G.hw.nat.tile[h];
     if (RegistryPropertyCreate(&G.entry, "NV34NDRV,diag", d, sizeof(d)) != noErr)
         RegistryPropertySet(&G.entry, "NV34NDRV,diag", d, sizeof(d));
 }

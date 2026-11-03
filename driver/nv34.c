@@ -105,6 +105,7 @@ static void wr_head(NVHw *hw, UInt32 reg, UInt32 val)
 static void snapshot(NVHw *hw)
 {
     NVNativeState *n = &hw->nat;
+    int i;
 
     n->cr_pixel = CR(CR_PIXEL);
     n->cr_offset = CR(CR_OFFSET);
@@ -133,6 +134,8 @@ static void snapshot(NVHw *hw)
     n->fp_debug0 = rd_head(hw, NV_PRAMDAC_FP_DEBUG_0);
     n->fp_debug1 = rd_head(hw, NV_PRAMDAC_FP_DEBUG_1);
     n->start = rd_head(hw, NV_PCRTC_START);
+    for (i = 0; i < 4; i++)
+        n->tile[i] = nv_rd32(hw, NV_PFB_TILE + i * 4);
 }
 
 static UInt32 head_bpp(NVHw *hw, int h)
@@ -168,7 +171,10 @@ OSStatus nv_probe(NVHw *hw, int regHead, UInt32 expBpp, UInt32 expPitch)
 
     /* Active head = the one whose format and pitch match what OF/boot ROM wrote into
      * `depth`/`linebytes`. PB 6,2: the panel is driven by head 1 (CR28 0x83, pitch 4096), head 0 stays
-     * at 8 bpp/1024 from the OF prompt — even though the node is called Display-A and has `reg 0`. */
+     * at 8 bpp/1024 from the OF prompt — even though the node is called Display-A and has `reg 0`.
+     * The Startup Manager (Option at boot) leaves the panel at 8 bpp/1024 too: then both heads match the
+     * format and head 0 won on `reg 0` → we programmed a head that is not displayed. The head that drives
+     * the panel has CR28 bit 7 (CRTC slave of the FP timing generator) — that decides first. */
     for (h = 0; h < 2; h++) {
         NVHeadDiag *d = &hw->headDiag[h];
         int score = 0;
@@ -180,6 +186,8 @@ OSStatus nv_probe(NVHw *hw, int regHead, UInt32 expBpp, UInt32 expPitch)
         d->crtc_cfg = nv_rd32(hw, NV_PCRTC_CONFIG + h * NV_HEAD_STRIDE);
         d->cr = nv_rdcr(hw, h, CR_PIXEL) | nv_rdcr(hw, h, CR_OFFSET) << 8 |
                 nv_rdcr(hw, h, CR_RPC0) << 16 | (UInt32)nv_rdcr(hw, h, CR_42) << 24;
+        if (nv_rdcr(hw, h, CR_PIXEL) & 0x80)
+            score += 16;
         if (head_bpp(hw, h) == expBpp && head_pitch(hw, h) == expPitch)
             score += 8;
         if (d->start == hw->fbOffset)
@@ -204,6 +212,7 @@ OSStatus nv_probe(NVHw *hw, int regHead, UInt32 expBpp, UInt32 expPitch)
      * swap the bytes a second time when switching to 16/32 bpp. */
     hw->keepEndian = (hw->curBpp > 8) || (hw->pcrtcConfig & 0x80000000);
     hw->scaled = 0;
+    hw->tileFixed = 0;
     return noErr;
 }
 
@@ -289,6 +298,37 @@ static void restore_display_size(NVHw *hw)
     SETCR(CR_VRE, vre);
 }
 
+/* OF puts its framebuffer into PFB tile region 0. A normal boot leaves 32 bpp: base 0x4000,
+ * limit 0x300000, pitch 4096 — covers every mode. The Startup Manager (Option at boot) leaves 8 bpp
+ * and a region sized for it, so a 16/32 bpp framebuffer runs past its limit: the 2D engine then
+ * blits garbage into the lower part of the screen (dragging windows). Once, on the first mode set
+ * (the screen is repainted anyway), widen the region to what a normal boot sets up. QD Accel and
+ * MiniGL copy the PFB regions into PGRAPH when they start. */
+#define TILE_LIMIT  0x300000
+#define TILE_PITCH  0x1000
+
+static void fix_tile(NVHw *hw)
+{
+    UInt32 addr = nv_rd32(hw, NV_PFB_TILE);
+    int i;
+
+    hw->tileFixed = 1;
+    if (!(addr & 1) || (addr & ~1UL) != hw->fbOffset)
+        return;
+    if (nv_rd32(hw, NV_PFB_TILE + 4) >= TILE_LIMIT && nv_rd32(hw, NV_PFB_TILE + 8) == TILE_PITCH)
+        return;
+    nv_wr32(hw, NV_PFB_TILE, 0);
+    nv_wr32(hw, NV_PFB_TILE + 4, TILE_LIMIT);
+    nv_wr32(hw, NV_PFB_TILE + 8, TILE_PITCH);
+    nv_wr32(hw, NV_PFB_TILE, addr);
+    /* QD Accel may already be running (a mode switch after its INIT): its PGRAPH copy as in nva_init_engine */
+    for (i = 0; i < 4; i++) {
+        UInt32 v = nv_rd32(hw, NV_PFB_TILE + i * 4);
+        nv_wr32(hw, 0x400900 + i * 4, v);
+        nv_wr32(hw, 0x406900 + i * 4, v);
+    }
+}
+
 void nv_set_mode(NVHw *hw, UInt32 width, UInt32 height, UInt32 nativeW, UInt32 nativeH,
                  UInt32 bpp, UInt32 pitch)
 {
@@ -297,6 +337,8 @@ void nv_set_mode(NVHw *hw, UInt32 width, UInt32 height, UInt32 nativeW, UInt32 n
     int scale = (width != nativeW || height != nativeH);
 
     SETCR(CR_LOCK, NV_CR_UNLOCK);
+    if (!hw->tileFixed)
+        fix_tile(hw);
 
     /* Pixel format: (depth + 1) / 8 as in nouveau; keep the slave bit for the FP. */
     SETCR(CR_PIXEL, (n->cr_pixel & 0x80) | (bpp == 8 ? 1 : bpp == 16 ? 2 : 3));

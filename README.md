@@ -9,7 +9,7 @@ no acceleration and software-only OpenGL. This project replaces all of that with
 
 | Component | Version | What it does |
 |---|---|---|
-| NV34 NDRV | 4.0.4 | native video driver: 1024×768 / 800×600 / 640×480 in 256 / Thousands / Millions, CLUT, gamma |
+| NV34 NDRV | 4.0.5 | native video driver: 1024×768 / 800×600 / 640×480 in 256 / Thousands / Millions, CLUT, gamma |
 | NV34 QD Accel | 1.9 | INIT: QuickDraw 2D acceleration (screen → screen CopyBits on the GPU), GPU manager (512 KB push buffer, VRAM arena) shared by the 3D components |
 | NV34 RAVE | 1.1 | QuickDraw 3D RAVE engine — Unreal Tournament |
 | NV34 MiniGL (`OpenGLLibrary`) | 1.0 | OpenGL 1.1 + AGL on the GPU, placed in a game folder — Quake II, Quake III, Half-Life, Return to Castle Wolfenstein, Max Payne, Medal of Honor |

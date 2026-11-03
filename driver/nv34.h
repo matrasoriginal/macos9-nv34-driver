@@ -13,6 +13,7 @@
 #define NV_PMC_BOOT_0               0x000000
 #define NV_PMC_BOOT_1               0x000004    /* 0 = LE, 0x01000001 = BE */
 
+#define NV_PFB_TILE                 0x100240    /* region 0: addr | enable, limit, pitch, flags */
 #define NV_PCRTC_START              0x600800
 #define NV_PCRTC_CONFIG             0x600804
 
@@ -79,6 +80,7 @@ typedef struct NVNativeState {
     UInt32  hde, hbs, vde, vbs;
     UInt32  gen_ctrl, fp_tg, fp_debug0, fp_debug1;
     UInt32  start;
+    UInt32  tile[4];    /* PFB tile region 0 as OF left it */
 } NVNativeState;
 
 typedef struct NVHeadDiag {
@@ -100,6 +102,7 @@ typedef struct NVHw {
     UInt32          curBpp;     /* currently set in HW */
     UInt32          curPitch;
     int             scaled;
+    int             tileFixed;
     int             keepEndian; /* started in 16/32 bpp → endianness set by the predecessor */
     UInt32          pcrtcConfig;
     NVNativeState   nat;

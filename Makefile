@@ -1,11 +1,14 @@
 # Everything for testing on the PowerBook on a single HFS image:
 #   NV34 NDRV           driver
-#   NV34 Info, NV34 Bench, NV34 Accel (2D engine test)
-#   NV34 GL Test        first 3D triangle (phase 4)
 #   NV34 QD Accel       INIT (68k stub + PPC fragment): GPU CopyBits screen → screen
-#   NV34 RAVE           QuickDraw 3D RAVE engine ('shlb'/'tnsl', Extensions) + NV34 RAVE Test
+#   NV34 RAVE           QuickDraw 3D RAVE engine ('shlb'/'tnsl', Extensions)
 #   NV34 MiniGL         custom OpenGLLibrary for games (goes in the game folder, not Extensions)
+#   NV34 CPU            full CPU clock on the PowerBook6,2
 #   make            → dist/NV34 test.dsk + dist/*.bin
+#   make release    → dist/NV34 Release.dsk (installation package, docs/INSTALL.md)
+#
+# Private test and diagnostic programs (NV34 Info, Bench, Accel, GL Test, GL Check, DSp Test,
+# RAVE Test) are not part of the public repository; they are built only if their folders exist.
 RETRO68 ?= $(HOME)/Retro68-build/toolchain
 H := $(RETRO68)/bin
 TC := -DCMAKE_TOOLCHAIN_FILE=$(RETRO68)/powerpc-apple-macos/cmake/retroppc.toolchain.cmake
@@ -16,21 +19,13 @@ driver:
 	$(MAKE) -C driver clean
 	$(MAKE) -C driver dist
 
+TESTDIRS := $(wildcard nv34info nv34bench nv34accel nv34gl nv34ravetest nv34glcheck nv34dsptest)
+
 apps:
-	cmake -S nv34info -B nv34info/build $(TC) >/dev/null
-	cmake --build nv34info/build
-	cmake -S nv34bench -B nv34bench/build $(TC) >/dev/null
-	cmake --build nv34bench/build
-	cmake -S nv34accel -B nv34accel/build $(TC) >/dev/null
-	cmake --build nv34accel/build
-	cmake -S nv34gl -B nv34gl/build $(TC) >/dev/null
-	cmake --build nv34gl/build
-	cmake -S nv34ravetest -B nv34ravetest/build $(TC) >/dev/null
-	cmake --build nv34ravetest/build
-	cmake -S nv34glcheck -B nv34glcheck/build $(TC) >/dev/null
-	cmake --build nv34glcheck/build
-	cmake -S nv34dsptest -B nv34dsptest/build $(TC) >/dev/null
-	cmake --build nv34dsptest/build
+	mkdir -p dist
+	for d in $(TESTDIRS); do \
+	  cmake -S $$d -B $$d/build $(TC) >/dev/null && cmake --build $$d/build && cp $$d/build/*.bin dist/ || exit 1; \
+	done
 	cmake -S nv34cpu -B nv34cpu/build $(TC) >/dev/null
 	cmake --build nv34cpu/build
 	$(MAKE) -C nv34qd
@@ -40,9 +35,7 @@ apps:
 	$(MAKE) -C minigl
 	VERS=1.0 VERS_INFO="NV34 MiniGL (OpenGL 1.1 + AGL)" NDRV_TYPE=shlb NDRV_CREATOR=NV34 tools/mkndrv.sh minigl/build/MiniGL.pef "OpenGLLibrary" minigl/build >/dev/null
 	cp minigl/build/OpenGLLibrary.bin dist/OpenGLLibrary.bin
-	cp nv34info/build/NV34Info.bin nv34bench/build/NV34Bench.bin nv34accel/build/NV34Accel.bin \
-	   nv34gl/build/NV34GL.bin nv34ravetest/build/NV34RAVETest.bin nv34glcheck/build/NV34GLCheck.bin \
-	   nv34dsptest/build/NV34DSpTest.bin nv34cpu/build/NV34CPU.bin dist/
+	cp nv34cpu/build/NV34CPU.bin dist/
 	cp nv34qd/build/NV34QD-INIT.bin dist/NV34QD.bin
 
 dist/NV34\ test.dsk: driver apps
@@ -51,13 +44,13 @@ dist/NV34\ test.dsk: driver apps
 	$(H)/hformat -l "NV34 test" "$@" >/dev/null
 	$(H)/hmount "$@" >/dev/null
 	$(H)/hcopy -m "dist/NV34 NDRV.bin" ":NV34 NDRV"
-	$(H)/hcopy -m dist/NV34Info.bin ":NV34 Info"
-	$(H)/hcopy -m dist/NV34Bench.bin ":NV34 Bench"
-	$(H)/hcopy -m dist/NV34Accel.bin ":NV34 Accel"
 	$(H)/hcopy -m dist/NV34QD.bin ":NV34 QD Accel"
-	$(H)/hcopy -m dist/NV34GL.bin ":NV34 GL Test"
 	$(H)/hcopy -m dist/NV34RAVE.bin ":NV34 RAVE"
-	$(H)/hcopy -m dist/NV34RAVETest.bin ":NV34 RAVE Test"
+	$(H)/hcopy -m dist/NV34CPU.bin ":NV34 CPU"
+	for t in "Info:NV34 Info" "Bench:NV34 Bench" "Accel:NV34 Accel" "GL:NV34 GL Test" "RAVETest:NV34 RAVE Test" \
+	         "GLCheck:NV34 GL Check" "DSpTest:NV34 DSp Test"; do \
+	  f=dist/NV34$${t%%:*}.bin; [ ! -f "$$f" ] || $(H)/hcopy -m "$$f" ":$${t#*:}" || exit 1; \
+	done
 	$(H)/hmkdir ":NV34 MiniGL"
 	$(H)/hcopy -m dist/OpenGLLibrary.bin ":NV34 MiniGL:OpenGLLibrary"
 	$(H)/hcopy -r "minigl/NV34 MiniGL config" ":NV34 MiniGL:NV34 MiniGL config"
@@ -67,8 +60,7 @@ dist/NV34\ test.dsk: driver apps
 
 clean:
 	$(MAKE) -C driver clean
-	rm -rf nv34info/build nv34bench/build nv34accel/build nv34gl/build nv34ravetest/build nv34glcheck/build \
-	       nv34dsptest/build nv34cpu/build dist
+	rm -rf $(addsuffix /build,$(TESTDIRS)) nv34cpu/build dist
 	$(MAKE) -C nv34rave clean
 	$(MAKE) -C minigl clean
 	$(MAKE) -C nv34qd clean
@@ -93,10 +85,6 @@ release: driver apps
 	$(H)/hcopy -m dist/OpenGLLibrary.bin "$(R):For Game Folder:OpenGLLibrary"
 	$(H)/hcopy -r "minigl/NV34 MiniGL config" "$(R):For Game Folder:NV34 MiniGL config"
 	$(H)/hattrib -t TEXT -c ttxt "$(R):For Game Folder:NV34 MiniGL config"
-	$(H)/hcopy -m dist/NV34Info.bin "$(R):Tools:NV34 Info"
-	$(H)/hcopy -m dist/NV34GLCheck.bin "$(R):Tools:NV34 GL Check"
-	$(H)/hcopy -m dist/NV34DSpTest.bin "$(R):Tools:NV34 DSp Test"
-	$(H)/hcopy -m dist/NV34RAVETest.bin "$(R):Tools:NV34 RAVE Test"
 	$(H)/hcopy -m dist/NV34CPU.bin "$(R):Tools:NV34 CPU"
 	$(H)/hls -lR ":"
 	$(H)/humount >/dev/null

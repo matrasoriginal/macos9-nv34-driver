@@ -12,7 +12,6 @@ Drivers and 3D for the **GeForce FX Go5200 (NV34)** in the **12" PowerBook G4 (P
 | For Extensions | **NV34 RAVE** 1.1 | QuickDraw 3D RAVE engine (Unreal Tournament) | `System Folder:Extensions` |
 | For Game Folder | **OpenGLLibrary** (NV34 MiniGL 1.0) | our own OpenGL 1.1 + AGL on the GPU | **into the game folder** next to the application, not into Extensions |
 | For Game Folder | **NV34 MiniGL config** | MiniGL settings (flags) | next to `OpenGLLibrary` |
-| Tools | NV34 Info, NV34 GL Check, NV34 DSp Test, NV34 RAVE Test | diagnostics | anywhere |
 | Tools | **NV34 CPU** | higher CPU clock (765 → ~905 MHz) | anywhere or `Startup Items` |
 | | Read Me | this guide as plain text | |
 
@@ -114,4 +113,4 @@ make release
 ```
 
 Requires Retro68 (`~/Retro68-build/toolchain`). Output: `dist/NV34 Release.dsk` and `dist/*.bin`.
-Development details: [PLAN.md](../PLAN.md), [phase4-opengl.md](phase4-opengl.md).
+Sources and references: [README.md](../README.md).

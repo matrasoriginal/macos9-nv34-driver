@@ -9,3 +9,14 @@ NVIDIA-v3.1-2002/
 
 # macOS
 .DS_Store
+
+# development notes (phases) and private test / diagnostic programs — local only
+PLAN.md
+docs/phase*
+nv34info/
+nv34bench/
+nv34accel/
+nv34gl/
+nv34glcheck/
+nv34dsptest/
+nv34ravetest/

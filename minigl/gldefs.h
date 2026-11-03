@@ -1,6 +1,6 @@
 /*
- * OpenGL 1.1 a AGL konštanty a typy pre NV34 MiniGL (hodnoty podľa verejnej špecifikácie
- * OpenGL 1.1 a Apple agl.h; Retro68 hlavičky OpenGL neobsahuje).
+ * OpenGL 1.1 and AGL constants and types for NV34 MiniGL (values per the public OpenGL 1.1
+ * specification and Apple agl.h; Retro68 does not include OpenGL headers).
  */
 #ifndef NV34_GLDEFS_H
 #define NV34_GLDEFS_H
@@ -24,7 +24,7 @@ typedef void            GLvoid;
 #define GL_FALSE                0
 #define GL_TRUE                 1
 
-/* chyby */
+/* errors */
 #define GL_NO_ERROR             0
 #define GL_INVALID_ENUM         0x0500
 #define GL_INVALID_VALUE        0x0501
@@ -33,7 +33,7 @@ typedef void            GLvoid;
 #define GL_STACK_UNDERFLOW      0x0504
 #define GL_OUT_OF_MEMORY        0x0505
 
-/* primitívy */
+/* primitives */
 #define GL_POINTS               0x0000
 #define GL_LINES                0x0001
 #define GL_LINE_LOOP            0x0002
@@ -45,7 +45,7 @@ typedef void            GLvoid;
 #define GL_QUAD_STRIP           0x0008
 #define GL_POLYGON              0x0009
 
-/* porovnania */
+/* comparisons */
 #define GL_NEVER                0x0200
 #define GL_LESS                 0x0201
 #define GL_EQUAL                0x0202
@@ -68,7 +68,7 @@ typedef void            GLvoid;
 #define GL_ONE_MINUS_DST_COLOR  0x0307
 #define GL_SRC_ALPHA_SATURATE   0x0308
 
-/* stavy (glEnable) */
+/* states (glEnable) */
 #define GL_CULL_FACE            0x0B44
 #define GL_LIGHTING             0x0B50
 #define GL_FOG                  0x0B60
@@ -86,7 +86,7 @@ typedef void            GLvoid;
 #define GL_LINE_SMOOTH          0x0B20
 #define GL_POINT_SMOOTH         0x0B10
 
-/* polia vrcholov */
+/* vertex arrays */
 #define GL_VERTEX_ARRAY         0x8074
 #define GL_NORMAL_ARRAY         0x8075
 #define GL_COLOR_ARRAY          0x8076
@@ -94,14 +94,14 @@ typedef void            GLvoid;
 #define GL_TEXTURE_COORD_ARRAY  0x8078
 #define GL_EDGE_FLAG_ARRAY      0x8079
 
-/* strany */
+/* faces */
 #define GL_FRONT                0x0404
 #define GL_BACK                 0x0405
 #define GL_FRONT_AND_BACK       0x0408
 #define GL_CW                   0x0900
 #define GL_CCW                  0x0901
 
-/* matice */
+/* matrices */
 #define GL_MODELVIEW            0x1700
 #define GL_PROJECTION           0x1701
 #define GL_TEXTURE              0x1702
@@ -125,13 +125,13 @@ typedef void            GLvoid;
 #define GL_STENCIL_BUFFER_BIT   0x00000400
 #define GL_COLOR_BUFFER_BIT     0x00004000
 
-/* reťazce */
+/* strings */
 #define GL_VENDOR               0x1F00
 #define GL_RENDERER             0x1F01
 #define GL_VERSION              0x1F02
 #define GL_EXTENSIONS           0x1F03
 
-/* textúry */
+/* textures */
 #define GL_TEXTURE_MAG_FILTER   0x2800
 #define GL_TEXTURE_MIN_FILTER   0x2801
 #define GL_TEXTURE_WRAP_S       0x2802
@@ -153,7 +153,7 @@ typedef void            GLvoid;
 #define GL_REPLACE              0x1E01
 #define GL_ADD                  0x0104
 
-/* formáty */
+/* formats */
 #define GL_COLOR_INDEX          0x1900
 #define GL_ALPHA                0x1906
 #define GL_RGB                  0x1907

@@ -164,8 +164,8 @@ static UInt32 mem_mbs(UInt32 tbs)
 static void state(const char *when)
 {
     UInt32 tbs = tb_per_sec(), mhz = cpu_mhz(), mn = cpu_mhz_min();
-    out("%s: %lu MHz (dlha slucka), %lu MHz (bez preruseni, prerusenia %lu %%), timebase %lu Hz, "
-        "citanie RAM %lu MB/s; frequency-gpio %02x, voltage-gpio %02x, slewing-done %02x\n", when, mhz, mn,
+    out("%s: %lu MHz (long loop), %lu MHz (no interrupts, interrupts %lu %%), timebase %lu Hz, "
+        "RAM read %lu MB/s; frequency-gpio %02x, voltage-gpio %02x, slewing-done %02x\n", when, mhz, mn,
         mn > mhz ? (mn - mhz) * 100 / mn : 0, tbs, mem_mbs(tbs), *gFreq, *gVolt, *gSlew);
 }
 
@@ -284,7 +284,7 @@ int main(void)
     unsigned long secs;
     gLog = fopen("NV34 CPU.txt", "a");
     GetDateTime(&secs);
-    out("\n==== NV34 CPU 4 — %lu s od 1904, %lu s od startu (Option = znizeny takt)\n", secs,
+    out("\n==== NV34 CPU 4 — %lu s since 1904, %lu s since boot (Option = reduced clock)\n", secs,
         TickCount() / 60);
     run();
     if (gLog)

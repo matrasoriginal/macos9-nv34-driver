@@ -1,7 +1,7 @@
 /*
- * NV34 MiniGL — AGL (Apple GL 2.x pre Mac OS 9): pixel formáty, info o rendereri, kontexty,
- * drawable (okno = CGrafPtr), výmena buffrov. Kontext kreslí do zadného buffra vo VRAM
- * a aglSwapBuffers ho 2D blitom prenesie cez viditeľný región okna (ako NV34 RAVE).
+ * NV34 MiniGL — AGL (Apple GL 2.x for Mac OS 9): pixel formats, renderer info, contexts,
+ * drawable (window = CGrafPtr), buffer swap. A context draws into a back buffer in VRAM
+ * and aglSwapBuffers copies it with a 2D blit through the window's visible region (like NV34 RAVE).
  */
 #include <MacMemory.h>
 #include <Processes.h>
@@ -19,7 +19,7 @@
 #define AGL_BAD_FULLSCREEN  10012
 #define AGL_BAD_ALLOC       10016
 
-#define RENDERER_ID         0x00022600      /* vlastné (Apple: generic 0x20200, ATI 0x21000) */
+#define RENDERER_ID         0x00022600      /* our own (Apple: generic 0x20200, ATI 0x21000) */
 
 typedef struct PixFmt {
     NVU32   magic;                          /* 'NVpf' */
@@ -33,7 +33,7 @@ typedef struct RendInfo {
 } RendInfo;
 
 static GLenum gAglErr;
-static GLCtx *gCtxs[16];             /* na uvoľnenie VRAM pri ukončení */
+static GLCtx *gCtxs[16];             /* to release VRAM at exit */
 
 static GLboolean fail(GLenum e)
 {
@@ -51,7 +51,7 @@ static int depth_of(GDHandle gd)
     return gd && *gd ? (*(*gd)->gdPMap)->pixelSize : 32;
 }
 
-/* ---- pixel formát --------------------------------------------------------------- */
+/* ---- pixel format --------------------------------------------------------------- */
 
 static int bool_attr(GLint a)
 {
@@ -72,7 +72,7 @@ void *aglChoosePixelFormat(const GDHandle *gdevs, GLint ndev, const GLint *attri
     int i;
 
     if (gDbg)
-        lg("aglChoosePixelFormat: %d zariadeni", ndev);
+        lg("aglChoosePixelFormat: %d devices", ndev);
     p = (PixFmt *)NewPtrClear(sizeof(PixFmt));
     if (!p) {
         gAglErr = AGL_BAD_ALLOC;
@@ -85,7 +85,7 @@ void *aglChoosePixelFormat(const GDHandle *gdevs, GLint ndev, const GLint *attri
         if (!bool_attr(a))
             v = attribs[++i];
         if (gDbg)
-            lg("  atribut %d = %d", a, v);
+            lg("  attribute %d = %d", a, v);
         switch (a) {
         case AGL_DOUBLEBUFFER: p->dbl = 1; break;
         case AGL_DEPTH_SIZE:   p->depth = v <= 0 ? 0 : v <= 16 ? 16 : 24; break;
@@ -93,16 +93,16 @@ void *aglChoosePixelFormat(const GDHandle *gdevs, GLint ndev, const GLint *attri
         case AGL_FULLSCREEN:   p->fullscreen = 1; break;
         case AGL_STEREO:
         case AGL_OFFSCREEN:
-            lg("  -> nepodporovane");
+            lg("  -> unsupported");
             DisposePtr((Ptr)p);
             gAglErr = AGL_BAD_ATTRIBUTE;
             return 0;
         }
     }
     if (p->stencil)
-        lg("  stencil %d nepodporovany (0)", p->stencil);
+        lg("  stencil %d unsupported (0)", p->stencil);
     if (depth_of(p->gd) < 16)
-        lg("  obrazovka %d bpp: treba Thousands/Millions", depth_of(p->gd));
+        lg("  screen %d bpp: needs Thousands/Millions", depth_of(p->gd));
     return p;
 }
 
@@ -153,7 +153,7 @@ GDHandle *aglDevicesOfPixelFormat(void *pix, GLint *ndevs)
     return devs;
 }
 
-/* ---- info o rendereri ------------------------------------------------------------ */
+/* ---- renderer info ------------------------------------------------------------ */
 
 void *aglQueryRendererInfo(const GDHandle *gdevs, GLint ndev)
 {
@@ -194,7 +194,7 @@ GLboolean aglDescribeRenderer(void *rend, GLint prop, GLint *value)
     case AGL_VIDEO_MEMORY:   *value = (GLint)vram_total(); break;
     case AGL_TEXTURE_MEMORY: *value = (GLint)(vram_total() / 2); break;
     case AGL_BUFFER_MODES:   *value = 0x1 | 0x4 | 0x8; break;          /* mono, single, double */
-    case AGL_COLOR_MODES:    *value = 0x00001000 | 0x00008000; break;   /* RGB555 A8, ARGB8888 (približne) */
+    case AGL_COLOR_MODES:    *value = 0x00001000 | 0x00008000; break;   /* RGB555 A8, ARGB8888 (roughly) */
     case AGL_DEPTH_MODES:    *value = 0x1 | 0x800; break;               /* 0, 24 bit */
     case AGL_STENCIL_MODES:  *value = 0x1; break;
     case AGL_MAX_AUX_BUFFERS: case AGL_MIN_LEVEL: case AGL_MAX_LEVEL:
@@ -202,13 +202,13 @@ GLboolean aglDescribeRenderer(void *rend, GLint prop, GLint *value)
         *value = 0; break;
     default:
         if (first_time(0x60000000 | (NVU32)prop))
-            lg("aglDescribeRenderer: vlastnost %d neznama", prop);
+            lg("aglDescribeRenderer: property %d unknown", prop);
         *value = 0;
     }
     return GL_TRUE;
 }
 
-/* ---- celá obrazovka: skryť panel menu a control strip (hl-11) ---------------------------- */
+/* ---- full screen: hide the menu bar and control strip (hl-11) ---------------------------- */
 
 static int gHidden, gStripWasVisible;
 
@@ -238,12 +238,12 @@ static VoidFn menu_fn(const char *name)
     return 0;
 }
 
-/* hl-12: bez HideMenuBar (Mac OS 9 ju v InterfaceLib nemá) — klasicky výška panela menu 0
- * (FindWindow potom klik hore nehlási ako inMenuBar), pri obnove pôvodná */
+/* hl-12: no HideMenuBar (Mac OS 9 does not have it in InterfaceLib) — the classic menu bar height of 0
+ * (FindWindow then does not report a click at the top as inMenuBar), the original one on restore */
 static short gSavedMBar = -1;
 
 /* Control Strip: _ControlStripDispatch (0xAAF2), SBIsControlStripVisible 0x0000,
- * SBShowHideControlStrip 0x0101 (D0 selektor, Pascal zásobník) */
+ * SBShowHideControlStrip 0x0101 (D0 selector, Pascal stack) */
 static int strip(int op, int show)
 {
     long attr = 0;
@@ -253,7 +253,7 @@ static int strip(int op, int show)
     trap = (UniversalProcPtr)NGetTrapAddress(0xAAF2, kToolboxTrapType);
     if (!trap)
         return -1;
-    if (op == 0)                                    /* viditeľný? výsledok 1 B, selektor 2 B */
+    if (op == 0)                                    /* visible? result 1 B, selector 2 B */
         return (int)(CallUniversalProc(trap, 8 | (1 << 4) | (2 << 6), 0x0000) & 0xff);
     CallUniversalProc(trap, 8 | (2 << 6) | (1 << 8), 0x0101, (unsigned char)(show != 0));
     return 0;
@@ -283,11 +283,11 @@ static void full_hide(int hide)
     } else if (gStripWasVisible) {
         strip(1, 1);
     }
-    lg("cela obrazovka: panel menu %s (%s), control strip %s", hide ? "skryty" : "obnoveny",
-       f ? "HideMenuBar" : "vyska 0", gStripWasVisible ? (hide ? "skryty" : "obnoveny") : "nebol viditelny");
+    lg("full screen: menu bar %s (%s), control strip %s", hide ? "hidden" : "restored",
+       f ? "HideMenuBar" : "height 0", gStripWasVisible ? (hide ? "hidden" : "restored") : "was not visible");
 }
 
-/* ---- kontext a drawable ----------------------------------------------------------- */
+/* ---- context and drawable ----------------------------------------------------------- */
 
 static GDHandle device_of(PixMapPtr pm)
 {
@@ -298,7 +298,7 @@ static GDHandle device_of(PixMapPtr pm)
     return 0;
 }
 
-/* geometria okna → globálny obdĺžnik, zariadenie, zadný buffer potrebnej veľkosti */
+/* window geometry → global rectangle, device, back buffer of the needed size */
 static int update_geom(GLCtx *c)
 {
     CGrafPtr port = c->port;
@@ -310,7 +310,7 @@ static int update_geom(GLCtx *c)
         return 0;
     if ((port->portVersion & 0xC000) != 0xC000) {
         if (first_time(0x61000000))
-            lg("drawable nie je farebny port");
+            lg("drawable is not a color port");
         return 0;
     }
     pm = *port->portPixMap;
@@ -318,7 +318,7 @@ static int update_geom(GLCtx *c)
     c->gd = device_of(pm);
     if (!c->gd) {
         if (first_time(0x61100000))
-            lg("drawable nie je na obrazovke (baseAddr %x)", (NVU32)pm->baseAddr);
+            lg("drawable is not on the screen (baseAddr %x)", (NVU32)pm->baseAddr);
         return 0;
     }
     c->global.left = pr.left - pm->bounds.left;
@@ -329,13 +329,13 @@ static int update_geom(GLCtx *c)
     h = pr.bottom - pr.top;
     bpp = (*(*c->gd)->gdPMap)->pixelSize;
     {
-        /* hl-2: každá zmena okna / obrazovky do logu */
+        /* hl-2: log every window / screen change */
         static Rect lastG, lastScr;
         static int lastBpp;
         Rect scr = (*(*c->gd)->gdPMap)->bounds;
         if (lastG.left != c->global.left || lastG.top != c->global.top || lastG.right != c->global.right ||
             lastG.bottom != c->global.bottom || lastBpp != bpp || lastScr.right != scr.right || lastScr.bottom != scr.bottom) {
-            lg("drawable: okno (%d,%d)-(%d,%d), obrazovka %dx%d %d bpp rb %d", c->global.left, c->global.top,
+            lg("drawable: window (%d,%d)-(%d,%d), screen %dx%d %d bpp rb %d", c->global.left, c->global.top,
                c->global.right, c->global.bottom, scr.right - scr.left, scr.bottom - scr.top, bpp,
                (*(*c->gd)->gdPMap)->rowBytes & 0x3fff);
             lastG = c->global;
@@ -345,7 +345,7 @@ static int update_geom(GLCtx *c)
     }
     if (w <= 0 || h <= 0 || w > 2048 || h > 2048 || (bpp != 16 && bpp != 32)) {
         if (first_time(0x61200000 ^ (NVU32)(w << 12) ^ (NVU32)h ^ (NVU32)bpp))
-            lg("drawable %dx%d %d bpp nepodporovany", w, h, bpp);
+            lg("drawable %dx%d %d bpp unsupported", w, h, bpp);
         return 0;
     }
     {
@@ -362,15 +362,15 @@ static int update_geom(GLCtx *c)
         hw_target_free(&c->rt);
     c->hasRT = 0;
     if (S->ensure3D() != 0) {
-        lg("3D init zlyhal");
+        lg("3D init failed");
         return 0;
     }
     if (!hw_target_alloc(&c->rt, w, h, bpp, c->depthBits)) {
-        lg("malo VRAM pre zadny buffer %dx%d (volne %u KB)", w, h, S->vramFreeBytes() >> 10);
+        lg("not enough VRAM for a %dx%d back buffer (free %u KB)", w, h, S->vramFreeBytes() >> 10);
         return 0;
     }
     c->hasRT = 1;
-    lg("zadny buffer %dx%d %d bpp z%d: farba %x z %x pitch %u, okno na (%d,%d), VRAM volna %u KB", w, h, bpp,
+    lg("back buffer %dx%d %d bpp z%d: color %x z %x pitch %u, window at (%d,%d), VRAM free %u KB", w, h, bpp,
        c->rt.z16 ? 16 : 24,
        c->rt.colorOff, c->rt.zOff, c->rt.colorPitch, c->global.left, c->global.top, S->vramFreeBytes() >> 10);
     if (!c->viewportSet) {
@@ -396,7 +396,7 @@ void *aglCreateContext(void *pix, void *share)
         return 0;
     }
     if (!shared() || !hw_init()) {
-        lg("aglCreateContext: NV34 QD Accel / 3D nie je k dispozicii");
+        lg("aglCreateContext: NV34 QD Accel / 3D not available");
         gAglErr = AGL_BAD_ALLOC;
         return 0;
     }
@@ -404,7 +404,7 @@ void *aglCreateContext(void *pix, void *share)
     if (!c)
         c = (GLCtx *)NewPtrSysClear(sizeof(GLCtx));
     if (!c) {
-        lg("aglCreateContext: malo pamate (%u B)", (NVU32)sizeof(GLCtx));
+        lg("aglCreateContext: out of memory (%u B)", (NVU32)sizeof(GLCtx));
         gAglErr = AGL_BAD_ALLOC;
         return 0;
     }
@@ -421,7 +421,7 @@ void *aglCreateContext(void *pix, void *share)
                 break;
             }
     }
-    lg("aglCreateContext %x: %s, hlbka %d", (NVU32)c, c->dbl ? "double" : "single", c->depthBits);
+    lg("aglCreateContext %x: %s, depth %d", (NVU32)c, c->dbl ? "double" : "single", c->depthBits);
     return c;
 }
 
@@ -536,14 +536,14 @@ CGrafPtr aglGetDrawable(void *ctx)
 
 GLboolean aglSetOffScreen(void *ctx, GLsizei w, GLsizei h, GLsizei rowbytes, GLvoid *base)
 {
-    lg("aglSetOffScreen %dx%d nepodporovane", w, h);
+    lg("aglSetOffScreen %dx%d unsupported", w, h);
     (void)ctx; (void)rowbytes; (void)base;
     return fail(AGL_BAD_DRAWABLE);
 }
 
 GLboolean aglSetFullScreen(void *ctx, GLsizei w, GLsizei h, GLsizei freq, GLint device)
 {
-    lg("aglSetFullScreen %dx%d %d Hz zariadenie %d nepodporovane", w, h, freq, device);
+    lg("aglSetFullScreen %dx%d %d Hz device %d unsupported", w, h, freq, device);
     (void)ctx;
     return fail(AGL_BAD_FULLSCREEN);
 }
@@ -572,10 +572,10 @@ GLboolean aglConfigure(GLenum pname, GLuint param)
     return GL_TRUE;
 }
 
-/* fps-1: obmedzenie snímok za sekundu (predvolene 60) — nad 60 fps hry reagovali na myš
- * oneskorene; nv34glfps30 = 30 fps, nv34glfps75 = 75 fps, nv34glnofps = bez obmedzenia
- * fps-3: pevný rozvrh — snímka oneskorená do 4 periód sa dobehne ďalšími (bez čakania),
- * takže priemer je presne 60; až väčší výpadok (nahrávanie) začne rozvrh znova od teraz */
+/* fps-1: frame rate limit (60 by default) — above 60 fps games responded to the mouse
+ * with a delay; nv34glfps30 = 30 fps, nv34glfps75 = 75 fps, nv34glnofps = no limit
+ * fps-3: fixed schedule — a frame up to 4 periods late is caught up by the following ones (no waiting),
+ * so the average is exactly 60; only a bigger stall (loading) restarts the schedule from now */
 static NVU32 gFpsPeriod = 1, gFpsNext;
 NVU32 gTFps, gFpsLate, gFpsReset;
 
@@ -585,17 +585,17 @@ static void fps_limit(void)
     if (gFpsPeriod == 1) {
         int fps = gl_boot_arg("nv34glnofps") ? 0 : gl_boot_arg("nv34glfps30") ? 30 :
                   gl_boot_arg("nv34glfps75") ? 75 : 60;
-        gFpsPeriod = fps ? 18432000u / fps : 0;     /* timebase 18,432 MHz */
-        lg("obmedzenie fps: %d (0 = bez obmedzenia)", fps);
+        gFpsPeriod = fps ? 18432000u / fps : 0;     /* timebase 18.432 MHz */
+        lg("fps limit: %d (0 = no limit)", fps);
     }
     if (!gFpsPeriod)
         return;
     now = t0 = tb();
     if ((int)(now - gFpsNext) > (int)(4 * gFpsPeriod) || (int)(gFpsNext - now) > (int)gFpsPeriod) {
-        gFpsNext = now;                             /* prvá snímka alebo veľký výpadok: znova od teraz */
+        gFpsNext = now;                             /* first frame or a big stall: start over from now */
         gFpsReset++;
     } else if ((int)(gFpsNext - now) <= 0) {
-        gFpsLate++;                                 /* oneskorená: bez čakania, dobieha rozvrh */
+        gFpsLate++;                                 /* late: no waiting, catching up with the schedule */
     }
     while ((int)(gFpsNext - now) > 0)
         now = tb();
@@ -610,7 +610,7 @@ void aglSwapBuffers(void *ctx)
     if (!ctx_ok(c))
         return;
     if (gDbg)
-        lg("swap %d: zaciatok", c->frames + 1);
+        lg("swap %d: start", c->frames + 1);
     if (c == C)
         gl_flush_batch();
     if (!c->port || !update_geom(c) || !c->hasRT)
@@ -619,7 +619,7 @@ void aglSwapBuffers(void *ctx)
         gl_draw_fps();
     fps_limit();
     if (c->full) {
-        /* hl-11: celé okno vrátane miesta panela menu / control stripu (visRgn ich vynecháva) */
+        /* hl-11: the whole window including the menu bar / control strip area (visRgn leaves them out) */
         hw_present(&c->rt, c->gd, &c->global, 0);
     } else {
         CopyRgn(c->port->visRgn, c->rgn);
@@ -627,7 +627,7 @@ void aglSwapBuffers(void *ctx)
         hw_present(&c->rt, c->gd, &c->global, c->rgn);
     }
     if (gDbg)
-        lg("swap %d: hotovo", c->frames + 1);
+        lg("swap %d: done", c->frames + 1);
     gTSwap += tb() - t0;
     if (c == C)
         gl_frame_stats();
@@ -674,7 +674,7 @@ GLboolean aglSetInteger(void *ctx, GLenum pname, const GLint *params)
             c->swapRect[i] = params[i];
     }
     if (first_time(0x62000000 | pname))
-        lg("aglSetInteger %d = %d (ignorovane)", pname, params ? params[0] : 0);
+        lg("aglSetInteger %d = %d (ignored)", pname, params ? params[0] : 0);
     return GL_TRUE;
 }
 
@@ -705,7 +705,7 @@ GLboolean aglGetInteger(void *ctx, GLenum pname, GLint *params)
 GLboolean aglUseFont(void *ctx, GLint fontID, short face, GLint size, GLint first, GLint count, GLint base)
 {
     (void)ctx; (void)fontID; (void)face; (void)size; (void)first; (void)count; (void)base;
-    lg("aglUseFont nepodporovane");
+    lg("aglUseFont unsupported");
     return GL_FALSE;
 }
 
@@ -735,9 +735,9 @@ void aglResetLibrary(void)
 }
 
 /* CFM init/term (pef.py setinit) */
-/* q3-15: Power Manager — takt procesora. Mac OS 9 nepozná PowerBook6,2 a procesor beží na
- * ~750 MHz namiesto 1 GHz (meranie q3-13/14). boot-args nv34cpufull = SetProcessorSpeed(true),
- * nv34cputoggle = najprv nízka, potom plná rýchlosť (prinúti prepnutie). */
+/* q3-15: Power Manager — CPU clock. Mac OS 9 does not know the PowerBook6,2 and the CPU runs at
+ * ~750 MHz instead of 1 GHz (measured in q3-13/14). boot-args nv34cpufull = SetProcessorSpeed(true),
+ * nv34cputoggle = low speed first, then full speed (forces a switch). */
 static void *lib_fn(const char *lib, const char *name)
 {
     ConnectionID conn;
@@ -773,23 +773,23 @@ static void cpu_speed(void)
     SetFn set = (SetFn)lib_fn("PowerMgrLib", "SetProcessorSpeed");
     int doFull = gl_boot_arg("nv34cpufull"), doToggle = gl_boot_arg("nv34cputoggle");
 
-    lg("Power Manager: GetCPUSpeed %d, aktualna %d, max %d, min %d MHz, plna %d, cycling %d; SetProcessorSpeed %s",
+    lg("Power Manager: GetCPUSpeed %d, current %d, max %d, min %d MHz, full %d, cycling %d; SetProcessorSpeed %s",
        getCPU ? getCPU() : -1, cur ? cur() : -1, max ? max() : -1, min ? min() : -1, full ? full() : -1,
-       cyc ? cyc() : -1, set ? "ano" : "nie");
-    lg("CPU zmerane: %u MHz", gl_cpu_mhz());
+       cyc ? cyc() : -1, set ? "yes" : "no");
+    lg("CPU measured: %u MHz", gl_cpu_mhz());
     if (!set || (!doFull && !doToggle))
         return;
     if (doToggle) {
         lg("SetProcessorSpeed(false) = %d", set(0));
-        lg("  -> zmerane %u MHz, aktualna %d", gl_cpu_mhz(), cur ? cur() : -1);
+        lg("  -> measured %u MHz, current %d", gl_cpu_mhz(), cur ? cur() : -1);
     }
     lg("SetProcessorSpeed(true) = %d", set(1));
-    lg("  -> zmerane %u MHz, aktualna %d, plna %d", gl_cpu_mhz(), cur ? cur() : -1, full ? full() : -1);
+    lg("  -> measured %u MHz, current %d, full %d", gl_cpu_mhz(), cur ? cur() : -1, full ? full() : -1);
 }
 
-/* mohaa-2: zachytenie výnimky procesu (chyba 2 v MOHAA) — PC, LR, DAR a reťaz LR zo zásobníka
- * sa uložia v handleri a zapíšu do logu až v MiniGLTerm (File Manager v handleri nie je bezpečný).
- * Typy podľa MachineExceptions.h (Retro68 ich nemá). */
+/* mohaa-2: catching a process exception (error 2 in MOHAA) — PC, LR, DAR and the LR chain from the stack
+ * are saved in the handler and written to the log only in MiniGLTerm (the File Manager is not safe in a handler).
+ * Types per MachineExceptions.h (Retro68 does not have them). */
 typedef struct { NVU32 hi, lo; } XWide;
 typedef struct { XWide CTR, LR, PC; NVU32 CR, XER, MSR, MQ, kind, DSISR; XWide DAR, res; } XMachine;
 typedef struct { XWide R[32]; } XRegs;
@@ -816,7 +816,7 @@ static long exc_handler(XInfo *x)
             for (i = 0; i < 32; i++)
                 gExcR[i] = x->r->R[i].lo;
         sp = gExcR[1];
-        for (i = 0; i < 8; i++) {                    /* reťaz rámcov: [sp] = predošlý sp, [sp+8] = uložený LR */
+        for (i = 0; i < 8; i++) {                    /* frame chain: [sp] = previous sp, [sp+8] = saved LR */
             NVU32 next;
             if (!sp || (sp & 3) || sp - gExcR[1] > 0x100000)
                 break;
@@ -829,7 +829,7 @@ static long exc_handler(XInfo *x)
     }
     if (gPrevExc)
         return gPrevExc(x);
-    return -1;                                      /* nevybavené: ďalej systému */
+    return -1;                                      /* not handled: pass on to the system */
 }
 
 static void exc_report(void)
@@ -837,13 +837,13 @@ static void exc_report(void)
     int i;
     if (!gExcN)
         return;
-    lg("VYNIMKA %u×: druh %u, PC %x, LR %x, DAR %x, DSISR %x, adresa %x; MiniGL kod: gl_draw_fps na %x, aglSwapBuffers na %x",
+    lg("EXCEPTION %ux: kind %u, PC %x, LR %x, DAR %x, DSISR %x, address %x; MiniGL code: gl_draw_fps at %x, aglSwapBuffers at %x",
        gExcN, gExcKind, gExcPC, gExcLR, gExcDAR, gExcDSISR, gExcMemAddr,
        *(NVU32 *)(void *)gl_draw_fps, *(NVU32 *)(void *)aglSwapBuffers);
     for (i = 0; i < 32; i += 8)
         lg("  r%d-r%d: %x %x %x %x %x %x %x %x", i, i + 7, gExcR[i], gExcR[i + 1], gExcR[i + 2], gExcR[i + 3],
            gExcR[i + 4], gExcR[i + 5], gExcR[i + 6], gExcR[i + 7]);
-    lg("  zasobnik LR: %x %x %x %x %x %x %x %x", gExcChain[0], gExcChain[1], gExcChain[2], gExcChain[3],
+    lg("  stack LR: %x %x %x %x %x %x %x %x", gExcChain[0], gExcChain[1], gExcChain[2], gExcChain[3],
        gExcChain[4], gExcChain[5], gExcChain[6], gExcChain[7]);
 }
 
@@ -860,13 +860,13 @@ OSErr MiniGLInit(void *initBlock)
     if (GetCurrentProcess(&psn) == noErr)
         GetProcessInformation(&psn, &info);
     name[name[0] < 31 ? name[0] + 1 : 31] = 0;
-    lg("==== NV34 MiniGL 1: nacitana v procese \"%s\", NV34 %s, 3D stav %u", (char *)name + 1,
-       shared() ? "ano" : "nie", S ? S->state3D : 0);
+    lg("==== NV34 MiniGL 1: loaded in process \"%s\", NV34 %s, 3D state %u", (char *)name + 1,
+       shared() ? "yes" : "no", S ? S->state3D : 0);
     /* CFragSystem7InitBlock: contextID, closureID, connectionID, fragLocator { where, fileSpec, … } */
     if (initBlock && (((const NVU32 *)initBlock)[3] == 1 || ((const NVU32 *)initBlock)[3] == 2))
-        gl_cfg_load((const FSSpec *)((const NVU32 *)initBlock)[4]);   /* dátová vetva / zdroj */
+        gl_cfg_load((const FSSpec *)((const NVU32 *)initBlock)[4]);   /* data fork / resource */
     else
-        lg("config: umiestnenie kniznice nezname");
+        lg("config: library location unknown");
     gl_stats_init();
     cpu_speed();
     if (!gl_boot_arg("nv34glnoexc")) {
@@ -880,7 +880,7 @@ void MiniGLTerm(void)
 {
     int i;
     if (gExcInst) {
-        InstallExceptionHandler(gPrevExc);          /* kód knižnice sa uvoľní — handler vrátiť */
+        InstallExceptionHandler(gPrevExc);          /* the library code is about to be unloaded — restore the handler */
         gExcInst = 0;
     }
     exc_report();
@@ -900,5 +900,5 @@ void MiniGLTerm(void)
             gCtxs[i]->hasRT = 0;
             gCtxs[i]->def.hw = 0;
         }
-    lg("NV34 MiniGL: ukoncenie, VRAM volna %u KB", S->vramFreeBytes() >> 10);
+    lg("NV34 MiniGL: shutting down, VRAM free %u KB", S->vramFreeBytes() >> 10);
 }

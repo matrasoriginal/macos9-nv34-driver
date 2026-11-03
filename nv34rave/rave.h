@@ -1,7 +1,7 @@
 /*
- * Minimálne deklarácie QuickDraw 3D RAVE 1.6 pre engine a test (rozhranie podľa verejnej
- * dokumentácie RAVE a Apple „Empty Engine“; Retro68 hlavičku RAVE.h neobsahuje).
- * Zarovnanie a veľkosti zodpovedajú PPC (power alignment, enum = 4 B).
+ * Minimal QuickDraw 3D RAVE 1.6 declarations for the engine and the test (interface per the public
+ * RAVE documentation and Apple's "Empty Engine"; Retro68 does not include the RAVE.h header).
+ * Alignment and sizes match PPC (power alignment, enum = 4 B).
  */
 #ifndef NV34_RAVE_H
 #define NV34_RAVE_H
@@ -63,7 +63,7 @@ typedef struct TQAVTexture {
 } TQAVTexture;
 typedef struct TQAVMultiTexture { float invW, uOverW, vOverW; } TQAVMultiTexture;
 
-/* tagy */
+/* tags */
 enum {
     kQATag_ZFunction = 0, kQATag_ColorBG_a = 1, kQATag_ColorBG_r = 2, kQATag_ColorBG_g = 3,
     kQATag_ColorBG_b = 4, kQATag_Width = 5, kQATag_ZMinOffset = 6, kQATag_ZMinScale = 7,
@@ -183,7 +183,7 @@ struct TQADrawContext {
     TQAError (*swapBuffers)(const TQADrawContext *, const TQARect *);
 };
 
-/* metódy enginu (RAVESystem.h) */
+/* engine methods (RAVESystem.h) */
 typedef union TQAEngineMethod {
     TQAError (*drawPrivateNew)(TQADrawContext *, const TQADevice *, const TQARect *, const TQAClip *, unsigned long flags);
     void (*drawPrivateDelete)(TQADrawPrivate *);
@@ -212,7 +212,7 @@ enum {
 };
 typedef TQAError (*TQAEngineGetMethod)(long methodTag, TQAEngineMethod *method);
 
-/* knižnica „QuickDraw™ 3D Accelerator“ (libQuickDraw3DRAVELib) */
+/* the "QuickDraw™ 3D Accelerator" library (libQuickDraw3DRAVELib) */
 extern TQAError QARegisterEngine(TQAEngineGetMethod);
 extern TQAError QARegisterEngineWithRefCon(TQAEngineGetMethod, long refCon);
 extern TQAEngine *QADeviceGetFirstEngine(const TQADevice *);
